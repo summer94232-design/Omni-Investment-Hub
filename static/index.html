@@ -285,6 +285,10 @@ function loadData() {
   fetch('/api/data').then(function(r) { return r.json(); }).then(function(d) {
     DATA = d;
     renderOverview();
+    // 若目前在持倉管理頁，同步更新持倉列表
+    if (document.getElementById('page-positions').classList.contains('active')) {
+      renderPositionsFull();
+    }
   });
 }
 
