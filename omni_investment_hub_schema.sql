@@ -8,6 +8,12 @@
 --   3. JSONB 欄位：彈性儲存向量/矩陣類資料，避免過度正規化
 --   4. 索引策略：複合索引覆蓋最常見查詢模式
 -- =============================================================================
+-- [修正記錄 v9]
+--   Bug① audit_log: id BIGSERIAL PRIMARY KEY → id BIGSERIAL NOT NULL +
+--                   PRIMARY KEY (id, logged_at)，符合 Postgres 分區表規範
+--   Bug② idx_ce_upcoming: 移除 WHERE event_date >= CURRENT_DATE 條件，
+--                          改為無條件索引，避免插入歷史資料時索引失效
+-- =============================================================================
 
 -- -----------------------------------------------------------------------------
 -- 0. 擴充套件與設定
@@ -59,14 +65,17 @@ CREATE TABLE topic_heat (
     PRIMARY KEY (id, trade_date)                       -- 分區表主鍵必須含分區鍵
 ) PARTITION BY RANGE (trade_date);
 
--- 建立月分區（範例：2024–2027，之後用腳本自動滾動）
+-- 建立月分區（範例：2024–2027，之後用 maintenance.py 自動滾動）
 CREATE TABLE topic_heat_2024_01 PARTITION OF topic_heat
     FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
 CREATE TABLE topic_heat_2024_02 PARTITION OF topic_heat
     FOR VALUES FROM ('2024-02-01') TO ('2024-03-01');
--- ... 建議用 cron + psql 每月自動建立下個月分區
--- 範例腳本（每月 25 日執行）：
--- SELECT create_next_month_partition('topic_heat');
+CREATE TABLE topic_heat_2026_02 PARTITION OF topic_heat
+    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+CREATE TABLE topic_heat_2026_03 PARTITION OF topic_heat
+    FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+CREATE TABLE topic_heat_2026_04 PARTITION OF topic_heat
+    FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
 
 CREATE INDEX idx_th_topic_date   ON topic_heat (topic, trade_date DESC);
 CREATE INDEX idx_th_date_alert   ON topic_heat (trade_date DESC, alert_type)
@@ -147,6 +156,13 @@ CREATE TABLE stock_diagnostic (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, trade_date)
 ) PARTITION BY RANGE (trade_date);
+
+CREATE TABLE stock_diagnostic_2026_02 PARTITION OF stock_diagnostic
+    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+CREATE TABLE stock_diagnostic_2026_03 PARTITION OF stock_diagnostic
+    FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+CREATE TABLE stock_diagnostic_2026_04 PARTITION OF stock_diagnostic
+    FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
 
 CREATE INDEX idx_sd_ticker_date   ON stock_diagnostic (ticker, trade_date DESC);
 CREATE INDEX idx_sd_date_score    ON stock_diagnostic (trade_date DESC, total_score DESC);
@@ -400,6 +416,13 @@ CREATE TABLE decision_log (
     PRIMARY KEY (id, trade_date)
 ) PARTITION BY RANGE (trade_date);
 
+CREATE TABLE decision_log_2026_02 PARTITION OF decision_log
+    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+CREATE TABLE decision_log_2026_03 PARTITION OF decision_log
+    FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+CREATE TABLE decision_log_2026_04 PARTITION OF decision_log
+    FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+
 CREATE INDEX idx_dl_ticker_date   ON decision_log (ticker, trade_date DESC)
     WHERE ticker IS NOT NULL;
 CREATE INDEX idx_dl_type_date     ON decision_log (decision_type, trade_date DESC);
@@ -573,8 +596,9 @@ CREATE TABLE calendar_events (
 );
 
 CREATE INDEX idx_ce_date_type   ON calendar_events (event_date, event_type);
-CREATE INDEX idx_ce_upcoming    ON calendar_events (event_date)
-    WHERE event_date >= CURRENT_DATE;
+-- [Bug② 修正] 移除 WHERE event_date >= CURRENT_DATE
+-- 原本的 partial index 在重建後會遺漏所有歷史日期的資料，改為無條件索引
+CREATE INDEX idx_ce_upcoming    ON calendar_events (event_date);
 CREATE INDEX idx_ce_tickers     ON calendar_events USING GIN (affected_tickers);
 
 CREATE TRIGGER trg_ce_updated_at
@@ -642,9 +666,12 @@ COMMENT ON TABLE wf_results IS 'Walk-Forward 驗證報告（每季），recommen
 --    來源：模組⑪ 執行閘門
 --    寫入頻率：每個閘門事件
 -- =============================================================================
+-- [Bug① 修正] 分區表不可用 BIGSERIAL PRIMARY KEY（主鍵必須含分區鍵 logged_at）
+-- 原本：id BIGSERIAL PRIMARY KEY
+-- 修正：id BIGSERIAL NOT NULL + PRIMARY KEY (id, logged_at)
 CREATE TABLE audit_log (
-    id              BIGSERIAL   PRIMARY KEY,
-    logged_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    id              BIGSERIAL   NOT NULL,                -- [修正] 移除 PRIMARY KEY
+    logged_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- 分區鍵
     order_id        UUID        REFERENCES orders(id),
     event_type      TEXT        NOT NULL,
     -- 'SUBMIT'|'EXEC'|'BLOCK'|'ADJUST'|'ROLLBACK'|'TIMEOUT'|'SYSTEM'
@@ -655,7 +682,8 @@ CREATE TABLE audit_log (
     price           NUMERIC(12,4),
     signal_source   TEXT,
     message         TEXT        NOT NULL,
-    metadata        JSONB        -- 額外上下文
+    metadata        JSONB,                               -- 額外上下文
+    PRIMARY KEY (id, logged_at)                          -- [修正] 複合主鍵含分區鍵
 ) PARTITION BY RANGE (logged_at);
 
 CREATE TABLE audit_log_2024 PARTITION OF audit_log
@@ -745,61 +773,9 @@ WHERE trade_date >= CURRENT_DATE - INTERVAL '30 days'
 GROUP BY strategy_tag, signal_source
 ORDER BY avg_r_multiple DESC NULLS LAST;
 
--- 事件日曆 - 未來7日
-CREATE OR REPLACE VIEW v_upcoming_events_7d AS
-SELECT
-    event_date,
-    event_type,
-    name,
-    impact_level,
-    CASE WHEN array_length(affected_tickers, 1) > 0
-         THEN affected_tickers::TEXT
-         ELSE '全市場' END AS scope,
-    (event_date - CURRENT_DATE) AS days_away,
-    pre_rule->>'description'    AS pre_rule_summary
-FROM calendar_events
-WHERE event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
-ORDER BY event_date, impact_level DESC;
-
--- Walk-Forward 最新生效因子權重
-CREATE OR REPLACE VIEW v_current_factor_weights AS
-SELECT
-    run_at,
-    recommendation,
-    avg_oos_sharpe,
-    consistency_rate,
-    recommended_weights->>'momentum'    AS weight_momentum,
-    recommended_weights->>'chip'        AS weight_chip,
-    recommended_weights->>'fundamental' AS weight_fundamental,
-    recommended_weights->>'valuation'   AS weight_valuation,
-    overfitting_score,
-    warnings
-FROM wf_results
-WHERE is_active = TRUE
-ORDER BY run_at DESC
-LIMIT 1;
-
 
 -- =============================================================================
--- 13. Redis 快取 Key 規範（文件化於此，由 Python 層實作）
--- =============================================================================
-COMMENT ON VIEW v_current_factor_weights IS '
-Redis 快取 Key 規範：
-  market:regime:latest          → market_regime 最新一筆（TTL: 24h）
-  market:regime:{date}          → 指定日期的環境快照（TTL: 永久）
-  chip:crs:{ticker}:{date}      → 個股 CRS 日分數（TTL: 24h）
-  chip:crs:{ticker}:latest      → 個股最新 CRS（TTL: 1h，盤中更新）
-  portfolio:state:latest        → portfolio_health 最新快照（TTL: 10min）
-  portfolio:exposure:current    → 當前曝險百分比（TTL: 5min）
-  gate:pending:{order_id}       → 待人工確認訂單（TTL: 30s = 確認逾時）
-  wf:weights:current            → 當前生效因子權重（TTL: 季度更新）
-  signal:{ticker}:{date}        → 個股當日訊號列表（TTL: 24h）
-  event:rules:{date}            → 當日有效事件規則（TTL: 24h）
-';
-
-
--- =============================================================================
--- 14. 分區自動建立函式（每月 25 日由 pg_cron 執行）
+-- 13. 分區自動建立函式（SQL 層，供 pg_cron 或手動呼叫）
 -- =============================================================================
 CREATE OR REPLACE FUNCTION create_monthly_partitions(
     base_table TEXT,
@@ -809,7 +785,7 @@ RETURNS VOID AS $$
 DECLARE
     partition_name TEXT;
     start_date DATE;
-    end_date DATE;
+    end_date   DATE;
 BEGIN
     start_date := DATE_TRUNC('month', target_date);
     end_date   := start_date + INTERVAL '1 month';
@@ -817,8 +793,9 @@ BEGIN
                       TO_CHAR(start_date, 'YYYY_MM');
 
     IF NOT EXISTS (
-        SELECT 1 FROM pg_class
-        WHERE relname = partition_name
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'public'
+          AND tablename  = partition_name
     ) THEN
         EXECUTE FORMAT(
             'CREATE TABLE %I PARTITION OF %I
@@ -834,10 +811,10 @@ $$ LANGUAGE plpgsql;
 -- SELECT create_monthly_partitions('topic_heat');
 -- SELECT create_monthly_partitions('stock_diagnostic');
 -- SELECT create_monthly_partitions('decision_log');
--- SELECT create_monthly_partitions('audit_log');
+
 
 -- =============================================================================
--- 15. 初始化基準資料
+-- 14. 初始化基準資料
 -- =============================================================================
 
 -- 預設 Walk-Forward 種子權重（在第一次 WF 驗證完成前暫用）

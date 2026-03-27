@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Omni-Investment Hub</title>
 <style>
+/* CSS 保持不變，維持原有樣式 */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f1117; color: #e2e8f0; }
 .header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
@@ -53,7 +54,7 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 </head>
 <body>
 <div class="header">
-  <h1>&#9889; Omni-Investment Hub</h1>
+  <h1>⚡ Omni-Investment Hub</h1>
   <div class="nav">
     <button class="active" onclick="showPage('overview')">總覽</button>
     <button onclick="showPage('positions')">持倉管理</button>
@@ -64,7 +65,6 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   <span id="clock" style="font-size:12px;color:#718096"></span>
 </div>
 
-<!-- 總覽 -->
 <div id="page-overview" class="page active">
   <div class="grid">
     <div class="card">
@@ -76,7 +76,7 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
       <div id="health-content"></div>
     </div>
     <div class="card wide">
-      <div class="card-title">持倉快照 <button class="btn sm green" onclick="showPage('positions')">管理持倉 &#8594;</button></div>
+      <div class="card-title">持倉快照 <button class="btn sm green" onclick="showPage('positions')">管理持倉 →</button></div>
       <div id="pos-preview"></div>
     </div>
     <div class="card">
@@ -90,11 +90,10 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
-<!-- 持倉管理 -->
 <div id="page-positions" class="page">
   <div class="grid">
     <div class="card wide">
-      <div class="card-title">目前持倉 <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button></div>
+      <div class="card-title">目前持倉（合併顯示） <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button></div>
       <div id="add-pos-form" style="display:none;background:#2d3748;padding:16px;border-radius:8px;margin-bottom:16px">
         <div class="form-row">
           <div><div class="form-label">股票代號</div><input id="ap-ticker" placeholder="例：2330"></div>
@@ -117,17 +116,10 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
-<!-- 選股分析 -->
 <div id="page-selection" class="page">
   <div class="grid">
     <div class="card wide">
-      <div class="card-title">
-        選股排行
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;color:#718096">門檻分數</span>
-          <input id="score-threshold" type="number" value="60" min="0" max="100" style="width:60px" onchange="renderSelection()">
-        </div>
-      </div>
+      <div class="card-title">選股排行</div>
       <div id="selection-content"></div>
     </div>
     <div class="card">
@@ -150,50 +142,34 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
-<!-- 工具 -->
 <div id="page-tools" class="page">
   <div class="grid">
     <div class="card">
       <div class="card-title">每日排程</div>
-      <p style="font-size:13px;color:#718096;margin-bottom:16px">手動觸發宏觀濾網，更新市場環境分析</p>
-      <button class="btn" style="width:100%" onclick="runScheduler()">&#9654; 執行宏觀濾網</button>
+      <button class="btn" style="width:100%" onclick="runScheduler()">▶ 執行宏觀濾網</button>
       <div id="scheduler-result"></div>
     </div>
     <div class="card">
       <div class="card-title">黑天鵝模擬</div>
-      <p style="font-size:13px;color:#718096;margin-bottom:16px">依目前 VIX 等指標檢查黑天鵝觸發條件</p>
-      <button class="btn amber" style="width:100%" onclick="runBlackSwan()">&#9888; 執行黑天鵝檢查</button>
+      <button class="btn amber" style="width:100%" onclick="runBlackSwan()">⚠ 執行黑天鵝檢查</button>
       <div id="bs-result"></div>
     </div>
     <div class="card">
       <div class="card-title">Walk-Forward 驗證</div>
-      <p style="font-size:13px;color:#718096;margin-bottom:16px">分析歷史績效，更新因子權重建議</p>
-      <button class="btn" style="width:100%;background:#553c9a" onclick="runWF()">&#128202; 執行 WF 驗證</button>
+      <button class="btn" style="width:100%;background:#553c9a" onclick="runWF()">📊 執行 WF 驗證</button>
       <div id="wf-result"></div>
     </div>
     <div class="card">
       <div class="card-title">新增財經事件</div>
       <div class="form-row">
         <div><div class="form-label">日期</div><input id="event-date" type="date"></div>
-        <div><div class="form-label">類型</div>
-          <select id="event-type">
-            <option value="FED">FED</option><option value="CPI">CPI</option>
-            <option value="GDP">GDP</option><option value="PMI">PMI</option>
-            <option value="EARNINGS">財報</option><option value="GEOPOLITICAL">地緣政治</option>
-            <option value="OTHER">其他</option>
-          </select>
-        </div>
-      </div>
-      <div style="margin-bottom:10px">
-        <div class="form-label">事件名稱</div>
-        <input id="event-name" placeholder="例：Fed 利率決議">
+        <div><div class="form-label">類型</div><input id="event-type" placeholder="FED"></div>
       </div>
       <div class="form-row">
-        <div><div class="form-label">影響等級（1-5）</div><input id="event-impact" type="number" value="3" min="1" max="5"></div>
-        <div style="display:flex;align-items:flex-end">
-          <button class="btn green" style="width:100%" onclick="addEvent()">新增事件</button>
-        </div>
+        <div><div class="form-label">事件名稱</div><input id="event-name"></div>
+        <div><div class="form-label">影響等級(1-5)</div><input id="event-impact" type="number" value="3"></div>
       </div>
+      <button class="btn green" style="width:100%" onclick="addEvent()">新增事件</button>
     </div>
     <div class="card wide">
       <div class="card-title">歷史訊號記錄</div>
@@ -202,24 +178,21 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
-<!-- 設定 -->
 <div id="page-settings" class="page">
   <div class="grid">
     <div class="card">
       <div class="card-title">執行模式</div>
-      <p style="font-size:13px;color:#718096;margin-bottom:16px">控制系統是否實際下單</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="mode-btn active" id="mode-PAPER" onclick="setMode('PAPER')">Paper</button>
         <button class="mode-btn" id="mode-ALERT_ONLY" onclick="setMode('ALERT_ONLY')">Alert Only</button>
         <button class="mode-btn" id="mode-SEMI_AUTO" onclick="setMode('SEMI_AUTO')">Semi Auto</button>
         <button class="mode-btn" id="mode-FULL_AUTO" onclick="setMode('FULL_AUTO')">Full Auto</button>
       </div>
-      <div id="mode-desc" style="margin-top:12px;font-size:12px;color:#718096"></div>
     </div>
     <div class="card">
-      <div class="card-title">模組參數調整</div>
+      <div class="card-title">核心參數</div>
       <div class="slider-row">
-        <label>ATR 倍數（進場止損）</label>
+        <label>ATR 倍數</label>
         <input type="range" min="1.5" max="5" step="0.5" value="3.0" id="atr-mult" oninput="document.getElementById('atr-mult-val').textContent=this.value">
         <span id="atr-mult-val">3.0</span>
       </div>
@@ -233,10 +206,39 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
         <input type="range" min="40" max="80" step="5" value="60" id="score-thresh" oninput="document.getElementById('score-thresh-val').textContent=this.value">
         <span id="score-thresh-val">60</span>
       </div>
+    </div>
+    <div class="card">
+      <div class="card-title">因子權重 (總和 100%)</div>
       <div class="slider-row">
-        <label>EV 最低門檻</label>
-        <input type="range" min="0" max="2" step="0.1" value="0.5" id="ev-thresh" oninput="document.getElementById('ev-thresh-val').textContent=this.value+'R'">
-        <span id="ev-thresh-val">0.5R</span>
+        <label>動能因子</label>
+        <input type="range" min="0" max="100" id="w-mom" oninput="updateWVal()">
+        <span id="w-mom-val">30%</span>
+      </div>
+      <div class="slider-row">
+        <label>籌碼因子</label>
+        <input type="range" min="0" max="100" id="w-chip" oninput="updateWVal()">
+        <span id="w-chip-val">25%</span>
+      </div>
+      <div class="slider-row">
+        <label>基本面因子</label>
+        <input type="range" min="0" max="100" id="w-fun" oninput="updateWVal()">
+        <span id="w-fun-val">25%</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">篩選範圍</div>
+      <div class="form-row">
+        <div>
+          <div class="form-label">排序範圍</div>
+          <select id="sel-universe">
+            <option value="ALL">全台股</option>
+            <option value="WATCHLIST">觀察清單</option>
+          </select>
+        </div>
+        <div>
+          <div class="form-label">錄取前 % (Top %)</div>
+          <input type="number" id="sel-top-pct" value="100" min="1" max="100">
+        </div>
       </div>
       <button class="btn" style="width:100%;margin-top:12px" onclick="saveSettings()">儲存設定</button>
     </div>
@@ -247,13 +249,7 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 
 <script>
 var DATA = {};
-var SETTINGS = { mode: 'PAPER', atr_mult: 3.0, trail_pct: 15, score_threshold: 60, ev_threshold: 0.5 };
-var MODE_DESC = {
-  'PAPER': '模擬交易，不實際下單，適合測試與觀察',
-  'ALERT_ONLY': '只發 Telegram 通知，不下單，適合人工決策',
-  'SEMI_AUTO': '大單需人工確認，小單自動執行',
-  'FULL_AUTO': '全自動下單，請確認風控設定正確'
-};
+var SETTINGS = { mode: 'PAPER', atr_mult: 3.0, trail_pct: 15, score_threshold: 60, universe: 'ALL', top_pct: 100, weights: { momentum: 0.3, chip: 0.25, fundamental: 0.25 } };
 
 setInterval(function() { document.getElementById('clock').textContent = new Date().toLocaleString('zh-TW'); }, 1000);
 
@@ -285,70 +281,70 @@ function loadData() {
   fetch('/api/data').then(function(r) { return r.json(); }).then(function(d) {
     DATA = d;
     renderOverview();
-    // 若目前在持倉管理頁，同步更新持倉列表
-    if (document.getElementById('page-positions').classList.contains('active')) {
-      renderPositionsFull();
-    }
+    if (document.getElementById('page-positions').classList.contains('active')) renderPositionsFull();
+    if (document.getElementById('page-selection').classList.contains('active')) renderSelection();
   });
 }
 
 function renderOverview() {
   var reg = DATA.regime || {};
   var h = DATA.health || {};
-  var vixCls = (reg.vix_level || 0) > 25 ? 'warn' : 'good';
-  var expPct = h.gross_exposure_pct ? (h.gross_exposure_pct * 100).toFixed(1) : '0.0';
-  var expCls = h.gross_exposure_pct > 0.8 ? 'bad' : h.gross_exposure_pct > 0.5 ? 'warn' : 'good';
-
   document.getElementById('regime-content').innerHTML =
     '<div style="margin-bottom:12px"><span class="badge ' + (reg.regime || '') + '">' + (reg.regime || 'N/A') + '</span></div>' +
     '<div class="metric"><span class="label">MRS 分數</span><span class="val neu">' + (reg.mrs_score || '-') + '</span></div>' +
-    '<div class="metric"><span class="label">VIX</span><span class="val ' + vixCls + '">' + (reg.vix_level || '-') + '</span></div>' +
-    '<div class="metric"><span class="label">曝險上限</span><span class="val neu">' + (reg.max_exposure_limit ? (reg.max_exposure_limit * 100).toFixed(0) + '%' : 'N/A') + '</span></div>';
+    '<div class="metric"><span class="label">VIX</span><span class="val">' + (reg.vix_level || '-') + '</span></div>';
 
   document.getElementById('health-content').innerHTML =
     '<div class="metric"><span class="label">NAV</span><span class="val neu">' + Number(h.nav || 0).toLocaleString() + ' 元</span></div>' +
-    '<div class="metric"><span class="label">曝險比例</span><span class="val ' + expCls + '">' + expPct + '%</span></div>' +
-    '<div class="metric"><span class="label">VaR 95%</span><span class="val warn">' + (h.portfolio_var_95 ? (h.portfolio_var_95 * 100).toFixed(2) + '%' : 'N/A') + '</span></div>' +
-    '<div class="metric"><span class="label">熔斷狀態</span><span class="val ' + (h.circuit_breaker_triggered ? 'bad' : 'good') + '">' + (h.circuit_breaker_triggered ? '⚠ 觸發' : '正常') + '</span></div>';
+    '<div class="metric"><span class="label">曝險比例</span><span class="val">' + (h.gross_exposure_pct * 100).toFixed(1) + '%</span></div>';
 
   var posRows = (DATA.positions || []).slice(0, 5).map(function(p) {
-    var r = p.r_multiple_current || 0;
-    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td><span class="tag">' + (p.state || '') + '</span></td><td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(r).toFixed(2) + 'R</td><td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(p.unrealized_pnl || 0).toLocaleString() + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無持倉</td></tr>';
-  document.getElementById('pos-preview').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>R</th><th>未實現損益</th></tr>' + posRows + '</table>';
+    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td><span class="tag">' + (p.state || '') + '</span></td><td>' + Number(p.r_multiple_current || 0).toFixed(2) + 'R</td></tr>';
+  }).join('') || '<tr><td colspan="3">無持倉</td></tr>';
+  document.getElementById('pos-preview').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>R</th></tr>' + posRows + '</table>';
 
   var chipRows = (DATA.chips || []).map(function(c) {
-    var sc = c.crs_total || 0;
-    return '<tr><td>' + String(c.ticker || '').trim() + '</td><td class="' + (sc >= 60 ? 'good' : sc >= 40 ? 'neu' : 'bad') + '">' + Number(sc).toFixed(1) + '</td><td>' + (c.three_way_resonance ? '<span class="good">✓</span>' : '-') + '</td></tr>';
-  }).join('') || '<tr><td colspan="3" style="color:#718096;text-align:center">無資料</td></tr>';
-  document.getElementById('chip-content').innerHTML = '<table><tr><th>股票</th><th>CRS</th><th>三向</th></tr>' + chipRows + '</table>';
+    return '<tr><td>' + String(c.ticker || '').trim() + '</td><td>' + Number(c.crs_total || 0).toFixed(1) + '</td></tr>';
+  }).join('');
+  document.getElementById('chip-content').innerHTML = '<table><tr><th>股票</th><th>CRS</th></tr>' + chipRows + '</table>';
 
   var sigRows = (DATA.signals || []).slice(0, 5).map(function(s) {
-    var t = s.logged_at ? new Date(s.logged_at).toLocaleTimeString('zh-TW') : '-';
-    return '<tr><td style="font-size:11px;color:#718096">' + t + '</td><td>' + (s.decision_type || '') + '</td><td>' + String(s.ticker || '').trim() + '</td></tr>';
-  }).join('') || '<tr><td colspan="3" style="color:#718096;text-align:center">無訊號</td></tr>';
+    return '<tr><td style="font-size:11px">' + new Date(s.logged_at).toLocaleTimeString() + '</td><td>' + (s.decision_type || '') + '</td><td>' + String(s.ticker || '').trim() + '</td></tr>';
+  }).join('');
   document.getElementById('sig-preview').innerHTML = '<table><tr><th>時間</th><th>類型</th><th>股票</th></tr>' + sigRows + '</table>';
+}
+
+function renderSelection() {
+  var rows = (DATA.stocks || []).map(function(s) {
+    var sc = s.total_score || 0;
+    var pass = s.pass_threshold;
+    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '"><td>' + String(s.ticker || '').trim() + '</td><td>' + Number(sc).toFixed(1) + '</td><td>' + Number(s.score_momentum || 0).toFixed(0) + '</td><td>' + Number(s.score_chip || 0).toFixed(0) + '</td><td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
+  }).join('') || '<tr><td colspan="5">無資料</td></tr>';
+  document.getElementById('selection-content').innerHTML = '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th></tr>' + rows + '</table>';
+  loadWatchlist();
+}
+
+function renderPositionsFull() {
+  var rows = (DATA.positions || []).map(function(p) {
+    // Bug #2 修復：顯示總股數與對應的批量平倉按鈕 
+    var idsJson = JSON.stringify(p.ids);
+    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td>' + (p.state || '') + '</td><td>' + (p.avg_cost || '-') + '</td><td>' + Number(p.current_shares || 0).toLocaleString() + '</td><td>' + Number(p.r_multiple_current || 0).toFixed(2) + 'R</td><td><button class="btn sm red" onclick=\'closePosition(' + idsJson + ',' + (p.avg_cost || 0) + ')\'>平倉</button></td></tr>';
+  }).join('') || '<tr><td colspan="6">無持倉</td></tr>';
+  document.getElementById('positions-full').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>平均成本</th><th>總股數</th><th>平均 R</th><th>操作</th></tr>' + rows + '</table>';
+}
+
+function closePosition(ids, price) {
+  if (!confirm('確定平倉該股票所有部位？')) return;
+  // Bug #2 修復：發送批量平倉請求 
+  post('/api/close-position', { position_ids: ids, price: price }).then(function(r) {
+    if (r.ok) { toast('平倉成功'); loadData(); }
+    else toast('失敗：' + r.error, true);
+  });
 }
 
 function toggleAddForm() {
   var f = document.getElementById('add-pos-form');
   f.style.display = f.style.display === 'none' ? 'block' : 'none';
-}
-
-function renderPositionsFull() {
-  var rows = (DATA.positions || []).map(function(p) {
-    var r = p.r_multiple_current || 0;
-    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td><span class="tag">' + (p.state || '') + '</span></td><td>' + (p.entry_price || '-') + '</td><td>' + (p.current_stop_price || '-') + '</td><td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(r).toFixed(2) + 'R</td><td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(p.unrealized_pnl || 0).toLocaleString() + '</td><td><button class="btn sm red" onclick="closePosition(\'' + p.id + '\',' + (p.entry_price || 0) + ')">平倉</button></td></tr>';
-  }).join('') || '<tr><td colspan="7" style="color:#718096;text-align:center">無持倉</td></tr>';
-  document.getElementById('positions-full').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損價</th><th>R</th><th>未實現損益</th><th>操作</th></tr>' + rows + '</table>';
-}
-
-function closePosition(id, price) {
-  if (!confirm('確定平倉？')) return;
-  post('/api/close-position', { position_id: id, price: price }).then(function(r) {
-    if (r.ok) { toast('平倉成功'); loadData(); }
-    else toast('失敗：' + r.error, true);
-  });
 }
 
 function addPosition() {
@@ -364,125 +360,52 @@ function addPosition() {
   });
 }
 
-function renderSelection() {
-  var thresh = parseInt(document.getElementById('score-threshold').value) || 60;
-  var rows = (DATA.stocks || []).map(function(s) {
-    var sc = s.total_score || 0;
-    var pass = sc >= thresh;
-    var pct = Math.min(100, sc);
-    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '"><td>' + String(s.ticker || '').trim() + (pass ? ' <span class="tag" style="background:#1c4532;color:#68d391">✓</span>' : '') + '</td><td><span class="bar-wrap"><span class="bar-fill" style="width:' + pct + '%"></span></span> ' + Number(sc).toFixed(1) + '</td><td>' + Number(s.score_momentum || 0).toFixed(0) + '</td><td>' + Number(s.score_chip || 0).toFixed(0) + '</td><td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
-  }).join('') || '<tr><td colspan="5" style="color:#718096;text-align:center">無資料</td></tr>';
-  document.getElementById('selection-content').innerHTML = '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th></tr>' + rows + '</table>';
-  loadWatchlist();
-}
-
 function loadWatchlist() {
   fetch('/api/watchlist').then(function(r) { return r.json(); }).then(function(list) {
     document.getElementById('watchlist-content').innerHTML = list.map(function(t) {
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2d3748"><span>' + t + '</span><button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
-    }).join('') || '<p style="color:#718096;font-size:13px">清單為空</p>';
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2d3748"><span>' + t + '</span><button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
+    }).join('') || '清單為空';
   });
 }
 
-function addToWatchlist() {
-  var t = document.getElementById('wl-input').value.trim().toUpperCase();
-  if (!t) return;
-  post('/api/watchlist/add', { ticker: t }).then(function() { loadWatchlist(); document.getElementById('wl-input').value = ''; toast(t + ' 已加入觀察清單'); });
-}
-
-function removeFromWatchlist(t) {
-  post('/api/watchlist/remove', { ticker: t }).then(function() { loadWatchlist(); toast(t + ' 已移除'); });
-}
-
-function runScheduler() {
-  document.getElementById('scheduler-result').innerHTML = '<p style="color:#718096;margin-top:12px">執行中...</p>';
-  fetch('/api/run-scheduler', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
-    if (r.ok) {
-      document.getElementById('scheduler-result').innerHTML = '<div class="result-box"><span style="color:#718096">環境：</span><span style="font-weight:600">' + r.regime + '</span>&nbsp;&nbsp;<span style="color:#718096">MRS：</span><span style="font-weight:600">' + r.mrs + '</span></div>';
-      toast('宏觀濾網執行完成'); loadData();
-    } else {
-      document.getElementById('scheduler-result').innerHTML = '<div class="result-box bad">失敗：' + r.error + '</div>';
-    }
-  });
-}
-
-function runEV() {
-  var ticker = document.getElementById('ev-ticker').value || 'TEST';
-  var score = document.getElementById('ev-score').value || 60;
-  document.getElementById('ev-result').innerHTML = '<p style="color:#718096;margin-top:12px">模擬中...</p>';
-  post('/api/ev-simulate', { ticker: ticker, score: score }).then(function(r) {
-    var vc = r.ev_total > 0.5 ? 'good' : 'bad';
-    document.getElementById('ev-result').innerHTML = '<div class="result-box"><span style="color:#718096">EV：</span><span class="' + vc + '" style="font-weight:600">' + Number(r.ev_total || 0).toFixed(2) + 'R</span>&nbsp;&nbsp;<span style="color:#718096">勝率：</span><span style="font-weight:600">' + (Number(r.win_rate || 0) * 100).toFixed(0) + '%</span><br><span style="color:#718096">結論：</span><span class="' + (r.entry_valid ? 'good' : 'bad') + '" style="font-weight:600">' + r.reason + '</span></div>';
-  });
-}
-
-function runBlackSwan() {
-  document.getElementById('bs-result').innerHTML = '<p style="color:#718096;margin-top:12px">檢查中...</p>';
-  fetch('/api/black-swan', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
-    var msg = r.triggered > 0 ? '<div class="result-box bad">觸發 ' + r.triggered + ' 個情境</div>' : '<div class="result-box" style="color:#68d391">無黑天鵝情境觸發</div>';
-    document.getElementById('bs-result').innerHTML = msg;
-  });
-}
-
-function runWF() {
-  document.getElementById('wf-result').innerHTML = '<p style="color:#718096;margin-top:12px">驗證中...</p>';
-  fetch('/api/walk-forward', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
-    if (r.recommended_weights) {
-      var w = r.recommended_weights;
-      document.getElementById('wf-result').innerHTML = '<div class="result-box"><span style="color:#718096">建議：</span><span style="font-weight:600">' + r.recommendation + '</span><br><span style="color:#718096">動能：</span><span style="font-weight:600">' + (w.momentum * 100).toFixed(0) + '%</span> <span style="color:#718096">籌碼：</span><span style="font-weight:600">' + (w.chip * 100).toFixed(0) + '%</span> <span style="color:#718096">基本面：</span><span style="font-weight:600">' + (w.fundamental * 100).toFixed(0) + '%</span></div>';
-    } else {
-      document.getElementById('wf-result').innerHTML = '<div class="result-box warn">資料不足，維持預設權重</div>';
-    }
-  });
-}
-
-function addEvent() {
-  var d = document.getElementById('event-date').value;
-  var type = document.getElementById('event-type').value;
-  var name = document.getElementById('event-name').value;
-  var impact = document.getElementById('event-impact').value;
-  if (!d || !name) { toast('請填入日期與事件名稱', true); return; }
-  post('/api/add-event', { event_date: d, event_type: type, name: name, impact_level: impact }).then(function(r) {
-    if (r.ok) { toast('事件新增成功'); document.getElementById('event-name').value = ''; }
-  });
-}
-
-function renderSignalsFull() {
-  var rows = (DATA.signals || []).map(function(s) {
-    var t = s.logged_at ? new Date(s.logged_at).toLocaleString('zh-TW') : '-';
-    return '<tr><td style="font-size:11px;color:#718096">' + t + '</td><td>' + (s.decision_type || '') + '</td><td>' + String(s.ticker || '').trim() + '</td><td>' + (s.signal_source || '') + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
-  document.getElementById('signals-full').innerHTML = '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>' + rows + '</table>';
-}
-
-function setMode(mode) {
-  SETTINGS.mode = mode;
-  document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
-  document.getElementById('mode-' + mode).classList.add('active');
-  document.getElementById('mode-desc').textContent = MODE_DESC[mode] || '';
+function updateWVal() {
+  document.getElementById('w-mom-val').textContent = document.getElementById('w-mom').value + '%';
+  document.getElementById('w-chip-val').textContent = document.getElementById('w-chip').value + '%';
+  document.getElementById('w-fun-val').textContent = document.getElementById('w-fun').value + '%';
 }
 
 function loadSettings() {
   fetch('/api/settings').then(function(r) { return r.json(); }).then(function(s) {
     SETTINGS = s;
-    setMode(s.mode || 'PAPER');
-    if (s.atr_mult) { document.getElementById('atr-mult').value = s.atr_mult; document.getElementById('atr-mult-val').textContent = s.atr_mult; }
-    if (s.trail_pct) { document.getElementById('trail-pct').value = s.trail_pct; document.getElementById('trail-pct-val').textContent = s.trail_pct + '%'; }
-    if (s.score_threshold) { document.getElementById('score-thresh').value = s.score_threshold; document.getElementById('score-thresh-val').textContent = s.score_threshold; }
-    if (s.ev_threshold) { document.getElementById('ev-thresh').value = s.ev_threshold; document.getElementById('ev-thresh-val').textContent = s.ev_threshold + 'R'; }
+    document.getElementById('atr-mult').value = s.atr_mult;
+    document.getElementById('trail-pct').value = s.trail_pct;
+    document.getElementById('score-thresh').value = s.score_threshold;
+    document.getElementById('w-mom').value = s.weights.momentum * 100;
+    document.getElementById('w-chip').value = s.weights.chip * 100;
+    document.getElementById('w-fun').value = s.weights.fundamental * 100;
+    document.getElementById('sel-universe').value = s.universe;
+    document.getElementById('sel-top-pct').value = s.top_pct;
+    updateWVal();
   });
 }
 
 function saveSettings() {
+  SETTINGS.weights = {
+    momentum: parseInt(document.getElementById('w-mom').value) / 100,
+    chip: parseInt(document.getElementById('w-chip').value) / 100,
+    fundamental: parseInt(document.getElementById('w-fun').value) / 100,
+    valuation: 0.2
+  };
+  SETTINGS.universe = document.getElementById('sel-universe').value;
+  SETTINGS.top_pct = parseInt(document.getElementById('sel-top-pct').value);
   SETTINGS.atr_mult = parseFloat(document.getElementById('atr-mult').value);
   SETTINGS.trail_pct = parseInt(document.getElementById('trail-pct').value);
   SETTINGS.score_threshold = parseInt(document.getElementById('score-thresh').value);
-  SETTINGS.ev_threshold = parseFloat(document.getElementById('ev-thresh').value);
-  post('/api/settings/save', SETTINGS).then(function() { toast('設定已儲存'); });
+  
+  post('/api/settings/save', SETTINGS).then(function() { toast('設定已儲存'); loadData(); });
 }
 
 loadData();
-setInterval(loadData, 60000);
 </script>
 </body>
 </html>
