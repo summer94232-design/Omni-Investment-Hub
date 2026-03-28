@@ -326,19 +326,39 @@ function renderSelection() {
 
 function renderPositionsFull() {
   var rows = (DATA.positions || []).map(function(p) {
-    // Bug #2 修復：顯示總股數與對應的批量平倉按鈕 
-    var idsJson = JSON.stringify(p.ids);
-    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td>' + (p.state || '') + '</td><td>' + (p.avg_cost || '-') + '</td><td>' + Number(p.current_shares || 0).toLocaleString() + '</td><td>' + Number(p.r_multiple_current || 0).toFixed(2) + 'R</td><td><button class="btn sm red" onclick=\'closePosition(' + idsJson + ',' + (p.avg_cost || 0) + ')\'>平倉</button></td></tr>';
-  }).join('') || '<tr><td colspan="6">無持倉</td></tr>';
-  document.getElementById('positions-full').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>平均成本</th><th>總股數</th><th>平均 R</th><th>操作</th></tr>' + rows + '</table>';
+    var avgCost = p.avg_cost != null ? Number(p.avg_cost).toFixed(2) : '-';
+    var rMult   = p.r_multiple_current != null ? Number(p.r_multiple_current).toFixed(2) + 'R' : '-';
+    var unrealPnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl).toFixed(0) : '0';
+    var pnlClass  = Number(p.unrealized_pnl) >= 0 ? 'good' : 'bad';
+    // 用 data-* 屬性儲存 ids（避免 HTML onclick 字串拼接破壞引號）
+    var idsEncoded = encodeURIComponent(JSON.stringify(p.ids || []));
+    return '<tr>' +
+      '<td><strong>' + String(p.ticker || '').trim() + '</strong></td>' +
+      '<td><span class="tag">' + (p.state || '-') + '</span></td>' +
+      '<td>' + avgCost + '</td>' +
+      '<td>' + Number(p.current_shares || 0).toLocaleString() + '</td>' +
+      '<td class="' + pnlClass + '">' + unrealPnl + '</td>' +
+      '<td>' + rMult + '</td>' +
+      '<td><button class="btn sm red" data-ids="' + idsEncoded + '" data-price="' + (p.avg_cost || 0) + '" onclick="closePosition(this)">平倉</button></td>' +
+      '</tr>';
+  }).join('') || '<tr><td colspan="7" style="color:#718096;text-align:center">無持倉</td></tr>';
+  document.getElementById('positions-full').innerHTML =
+    '<table><tr><th>股票</th><th>狀態</th><th>平均成本</th><th>總股數</th><th>未實現損益</th><th>R 值</th><th>操作</th></tr>' + rows + '</table>';
 }
 
-function closePosition(ids, price) {
+function closePosition(btn) {
   if (!confirm('確定平倉該股票所有部位？')) return;
-  // Bug #2 修復：發送批量平倉請求 
+  var ids   = JSON.parse(decodeURIComponent(btn.getAttribute('data-ids')));
+  var price = parseFloat(btn.getAttribute('data-price'));
+  if (!ids || ids.length === 0) { toast('找不到持倉 ID', true); return; }
+  btn.disabled = true;
+  btn.textContent = '處理中';
   post('/api/close-position', { position_ids: ids, price: price }).then(function(r) {
     if (r.ok) { toast('平倉成功'); loadData(); }
-    else toast('失敗：' + r.error, true);
+    else { toast('失敗：' + (r.error || '未知錯誤'), true); btn.disabled = false; btn.textContent = '平倉'; }
+  }).catch(function(e) {
+    toast('網路錯誤：' + e.message, true);
+    btn.disabled = false; btn.textContent = '平倉';
   });
 }
 
