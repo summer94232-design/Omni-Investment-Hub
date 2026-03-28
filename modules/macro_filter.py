@@ -1,4 +1,5 @@
 # modules/macro_filter.py
+import json
 import logging
 from datetime import date
 from typing import Optional
@@ -83,7 +84,7 @@ class MacroFilter:
 
         # 10Y-2Y 殖利率差（正斜率加分）
         y10 = indicators.get('us_10y_yield')
-        y2 = indicators.get('us_2y_yield')
+        y2  = indicators.get('us_2y_yield')
         if y10 and y2:
             spread = y10 - y2
             if spread > 0.5:
@@ -119,25 +120,28 @@ class MacroFilter:
         logger.info("FRED 指標：%s", indicators)
 
         # 計算 MRS
-        mrs = self._calc_mrs(indicators)
+        mrs    = self._calc_mrs(indicators)
         regime = self._classify_regime(mrs)
         config = REGIME_CONFIG[regime]
 
         result = {
-            'trade_date':        trade_date,
-            'regime':            regime,
-            'mrs_score':         round(mrs, 2),
-            'max_exposure':      config['max_exposure'],
-            'factor_weights':    config['weights'],
-            'atr_multiplier':    config['atr_multiplier'],
-            'vcp_enabled':       config['vcp_enabled'],
-            'vix_level':         indicators.get('vix'),
-            'fed_funds_rate':    indicators.get('fed_funds_rate'),
-            'us_10y_yield':      indicators.get('us_10y_yield'),
-            'us_2y_yield':       indicators.get('us_2y_yield'),
+            'trade_date':     trade_date,
+            'regime':         regime,
+            'mrs_score':      round(mrs, 2),
+            'max_exposure':   config['max_exposure'],
+            'factor_weights': config['weights'],
+            'atr_multiplier': config['atr_multiplier'],
+            'vcp_enabled':    config['vcp_enabled'],
+            'vix_level':      indicators.get('vix'),
+            'fed_funds_rate': indicators.get('fed_funds_rate'),
+            'us_10y_yield':   indicators.get('us_10y_yield'),
+            'us_2y_yield':    indicators.get('us_2y_yield'),
         }
 
         # 寫入 PostgreSQL
+        # [BUG FIX] 改用 json.dumps() 序列化 weights，避免 str() 產生非法 JSON
+        # str({'momentum': 0.38}) → "{'momentum': 0.38}"（單引號，Python True/False）
+        # json.dumps(...)        → '{"momentum": 0.38}'（合法 JSON，後續 json.loads() 才不會炸）
         await self.hub.execute("""
             INSERT INTO market_regime (
                 trade_date, regime, mrs_score,
@@ -146,19 +150,19 @@ class MacroFilter:
                 vix_level
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
             ON CONFLICT (trade_date) DO UPDATE SET
-                regime            = EXCLUDED.regime,
-                mrs_score         = EXCLUDED.mrs_score,
-                max_exposure_limit= EXCLUDED.max_exposure_limit,
-                factor_weights    = EXCLUDED.factor_weights,
-                atr_multiplier    = EXCLUDED.atr_multiplier,
-                vcp_enabled       = EXCLUDED.vcp_enabled,
-                vix_level         = EXCLUDED.vix_level
+                regime             = EXCLUDED.regime,
+                mrs_score          = EXCLUDED.mrs_score,
+                max_exposure_limit = EXCLUDED.max_exposure_limit,
+                factor_weights     = EXCLUDED.factor_weights,
+                atr_multiplier     = EXCLUDED.atr_multiplier,
+                vcp_enabled        = EXCLUDED.vcp_enabled,
+                vix_level          = EXCLUDED.vix_level
         """,
             trade_date,
             regime,
             mrs,
             config['max_exposure'],
-            str(config['weights']).replace("'", '"'),
+            json.dumps(config['weights']),   # [BUG FIX] str().replace() → json.dumps()
             config['atr_multiplier'],
             config['vcp_enabled'],
             indicators.get('vix'),

@@ -1,4 +1,5 @@
 # modules/selection_engine.py
+import json
 import logging
 from datetime import date
 from typing import Optional
@@ -17,11 +18,12 @@ DEFAULT_WEIGHTS = {
     'valuation':   0.20,
 }
 
+
 class SelectionEngine:
     """模組② 多因子選股引擎：整合宏觀/籌碼/基本面/動能，輸出個股總分"""
 
     def __init__(self, hub: DataHub, finmind: FinMindAPI):
-        self.hub = hub
+        self.hub     = hub
         self.finmind = finmind
 
     async def _get_active_weights(self, trade_date: date) -> dict:
@@ -33,7 +35,6 @@ class SelectionEngine:
         4. 系統預設值
         """
         # 1. 嘗試從 Redis 取得 UI 儲存的最新設定
-        # 注意：需確保 dashboard.py 的存檔 key 與此一致
         ui_settings = await self.hub.cache.get("portfolio:settings:current")
         if ui_settings and 'weights' in ui_settings:
             logger.info("使用 UI 手動調整之因子權重")
@@ -46,7 +47,6 @@ class SelectionEngine:
             ORDER BY trade_date DESC LIMIT 1
         """, trade_date)
         if macro_row and macro_row['factor_weights']:
-            import json
             return json.loads(macro_row['factor_weights'])
 
         # 3. 嘗試從 Walk-Forward 取得建議權重
@@ -56,7 +56,6 @@ class SelectionEngine:
             ORDER BY run_at DESC LIMIT 1
         """)
         if wf_row and wf_row['recommended_weights']:
-            import json
             return json.loads(wf_row['recommended_weights'])
 
         return DEFAULT_WEIGHTS
@@ -67,15 +66,15 @@ class SelectionEngine:
             return 50.0
 
         price_df = price_df.sort_values('date')
-        closes = price_df['close'].astype(float)
-        score = 50.0
+        closes   = price_df['close'].astype(float)
+        score    = 50.0
 
         # 20日漲幅
         if len(closes) >= 20:
             ret_20d = (closes.iloc[-1] - closes.iloc[-20]) / closes.iloc[-20]
-            if ret_20d > 0.15:   score += 25
-            elif ret_20d > 0.05: score += 15
-            elif ret_20d > 0:    score += 5
+            if ret_20d > 0.15:    score += 25
+            elif ret_20d > 0.05:  score += 15
+            elif ret_20d > 0:     score += 5
             elif ret_20d < -0.15: score -= 25
             elif ret_20d < -0.05: score -= 15
             else:                 score -= 5
@@ -91,9 +90,9 @@ class SelectionEngine:
                 score -= 15
 
         # 距52週高點
-        high_52w = closes.iloc[-252:].max() if len(closes) >= 252 else closes.max()
+        high_52w     = closes.iloc[-252:].max() if len(closes) >= 252 else closes.max()
         pct_from_high = (closes.iloc[-1] - high_52w) / high_52w
-        if pct_from_high > -0.05:  score += 10
+        if pct_from_high > -0.05:   score += 10
         elif pct_from_high < -0.30: score -= 10
 
         return round(max(0, min(100, score)), 2)
@@ -103,7 +102,7 @@ class SelectionEngine:
         if revenue_df.empty:
             return 50.0
 
-        score = 50.0
+        score      = 50.0
         revenue_df = revenue_df.sort_values('date')
 
         if len(revenue_df) >= 2:
@@ -111,9 +110,9 @@ class SelectionEngine:
             prev   = float(revenue_df['revenue'].iloc[-2])
             if prev > 0:
                 yoy = (latest - prev) / prev
-                if yoy > 0.20:   score += 25
-                elif yoy > 0.10: score += 15
-                elif yoy > 0:    score += 5
+                if yoy > 0.20:    score += 25
+                elif yoy > 0.10:  score += 15
+                elif yoy > 0:     score += 5
                 elif yoy < -0.20: score -= 25
                 elif yoy < -0.10: score -= 15
                 else:             score -= 5
@@ -137,25 +136,25 @@ class SelectionEngine:
         logger.info("選股引擎執行中：%s %s", ticker, trade_date)
         start_date = str(date(trade_date.year - 1, trade_date.month, trade_date.day))
 
-        # 1. 取得當前權重設定（含 UI 手動調整之邏輯）
+        # 1. 取得當前權重設定
         weights = await self._get_active_weights(trade_date)
 
-        # 2. 只有在權重 > 0 時才抓取數據，提升效率
+        # 2. 只有在權重 > 0 時才抓取數據
         score_momentum = 50.0
         if weights.get('momentum', 0) > 0:
-            price_df = await self.finmind.get_stock_price(ticker, start_date)
+            price_df       = await self.finmind.get_stock_price(ticker, start_date)
             score_momentum = self._calc_momentum_score(price_df)
 
         score_fundamental = 50.0
         if weights.get('fundamental', 0) > 0:
-            revenue_df = await self.finmind.get_revenue(ticker, start_date)
+            revenue_df        = await self.finmind.get_revenue(ticker, start_date)
             score_fundamental = self._calc_fundamental_score(revenue_df)
 
         score_chip = 50.0
         if weights.get('chip', 0) > 0:
             score_chip = await self._get_chip_score(ticker, trade_date)
 
-        score_valuation = 50.0 # 預留估值因子空間
+        score_valuation = 50.0  # 預留估值因子空間
 
         # 3. 計算加權總分
         total_score = (
@@ -171,8 +170,8 @@ class SelectionEngine:
             WHERE trade_date <= $1
             ORDER BY trade_date DESC LIMIT 1
         """, trade_date)
-        regime = regime_row['regime'] if regime_row else None
-        mrs = float(regime_row['mrs_score']) if regime_row else None
+        regime = regime_row['regime']    if regime_row else None
+        mrs    = float(regime_row['mrs_score']) if regime_row else None
 
         result = {
             'ticker':             ticker,
@@ -191,6 +190,9 @@ class SelectionEngine:
         }
 
         # 5. 寫入資料庫
+        # total_score 是 schema 中的 generated column（資料庫自動計算），
+        # 不可手動 INSERT，移除此欄位讓 DB 自行產生。
+        # walk_forward.py 查詢時直接讀取 DB 算好的值即可。
         await self.hub.execute("""
             INSERT INTO stock_diagnostic (
                 trade_date, ticker,

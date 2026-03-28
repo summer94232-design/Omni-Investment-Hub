@@ -15,13 +15,11 @@ logger = logging.getLogger("Scheduler")
 
 class Scheduler:
     def __init__(self, config_path='config.yaml'):
-        # 編碼修復：指定 utf-8
         with open(config_path, 'r', encoding='utf-8') as f:
             self.cfg = yaml.safe_load(f)
         self.hub = DataHub(config_path)
 
     async def run_daily_pipeline(self):
-        # 建立連線
         await self.hub.connect()
         logger.info("=== 開始每日自動化交易排程 ===")
 
@@ -38,14 +36,12 @@ class Scheduler:
                 logger.error("找不到 FRED API Key")
 
             # 2. 選股引擎 (FinMind API)
-            # 這裡兼容多種可能的 token 命名方式
             fm_cfg = self.cfg.get('finmind', {})
             token = fm_cfg.get('api_token') or fm_cfg.get('token')
-            
+
             if token:
                 finmind = FinMindAPI(token)
                 engine = SelectionEngine(self.hub, finmind)
-                # 您可以自訂要診斷的股票清單
                 watchlist = ['2330', '2317', '2454', '2303', '2382']
                 for ticker in watchlist:
                     await engine.run(ticker)
@@ -57,11 +53,10 @@ class Scheduler:
             if date.today().day >= 25:
                 logger.info("檢測到月底，執行自動分區維護...")
                 try:
-                    # 改為直接呼叫維護函式
-                    from maintenance import create_monthly_partitions
+                    # [BUG FIX] 修正 import 路徑：maintenance.py 位於 modules/ 目錄下
+                    from modules.maintenance import create_monthly_partitions
                     tables = ['topic_heat', 'stock_diagnostic', 'decision_log']
                     for table in tables:
-                        # 傳入 self.hub
                         await create_monthly_partitions(self.hub, table, months_ahead=2)
                     logger.info("分區維護完成")
                 except Exception as e:
@@ -71,9 +66,8 @@ class Scheduler:
             logger.error(f"排程執行中發生未預期錯誤: {e}")
         finally:
             logger.info("=== 每日排程執行完畢 ===")
-            # 注意：DataHub 類別中通常沒有 disconnect 而是用 close 或不需手動關閉
-            # 如果報錯 AttributeError，請將下方這行註解掉
-            # await self.hub.close() 
+            # [BUG FIX] 移除錯誤的 # 號註解，確保連線池正確關閉，避免資源洩漏
+            await self.hub.close()
 
 if __name__ == "__main__":
     scheduler = Scheduler()

@@ -9,10 +9,10 @@ from datahub import redis_keys as rk
 logger = logging.getLogger(__name__)
 
 # 風險參數
-MAX_SINGLE_POSITION_PCT = 0.10   # 單一持倉最大佔 NAV 10%
-MAX_CORRELATION_RHO     = 0.70   # 相關係數超過此值限制加倉
-DRAWDOWN_CIRCUIT_BREAK  = 0.10   # 從高點回落 10% 觸發熔斷
-DAILY_LOSS_CIRCUIT_BREAK= 0.03   # 單日虧損 3% 觸發熔斷
+MAX_SINGLE_POSITION_PCT  = 0.10   # 單一持倉最大佔 NAV 10%
+MAX_CORRELATION_RHO      = 0.70   # 相關係數超過此值限制加倉
+DRAWDOWN_CIRCUIT_BREAK   = 0.10   # 從高點回落 10% 觸發熔斷
+DAILY_LOSS_CIRCUIT_BREAK = 0.03   # 單日虧損 3% 觸發熔斷
 
 EXPOSURE_LEVELS = {
     'BULL_TREND': 0.90,
@@ -45,10 +45,12 @@ class PositionManager:
 
         # 假設初始資金 1,000,000（實際應從帳戶 API 取得）
         initial_capital = 1_000_000.0
-        total_pnl = sum(float(p['unrealized_pnl'] or 0) + float(p['realized_pnl'] or 0)
-                       for p in positions)
-        nav = initial_capital + total_pnl
-        cash = nav - total_market_value
+        total_pnl = sum(
+            float(p['unrealized_pnl'] or 0) + float(p['realized_pnl'] or 0)
+            for p in positions
+        )
+        nav           = initial_capital + total_pnl
+        cash          = nav - total_market_value
         gross_exposure = total_market_value / nav if nav > 0 else 0
 
         return {
@@ -62,13 +64,12 @@ class PositionManager:
         """計算 95% VaR（簡化歷史模擬法）"""
         if not positions or nav <= 0:
             return 0.0
-        # 假設每日波動率 2%（實際應用歷史報酬計算）
         portfolio_value = sum(
             float(p['avg_cost'] or p['entry_price']) * p['current_shares']
             for p in positions
         )
         daily_vol = 0.02
-        var_95 = portfolio_value * daily_vol * 1.645 / nav
+        var_95    = portfolio_value * daily_vol * 1.645 / nav
         return round(var_95, 4)
 
     def check_circuit_breaker(
@@ -95,14 +96,41 @@ class PositionManager:
             return False, f"{ticker} 佔比 {pct*100:.1f}% 超過上限 {MAX_SINGLE_POSITION_PCT*100:.0f}%"
         return True, ""
 
+    async def _calc_drawdown_and_daily_pnl(self, nav: float) -> tuple[float, float]:
+        """
+        [BUG FIX] 從資料庫歷史快照計算真實的 drawdown 和 daily_pnl_pct。
+        原本 hardcode 為 0.0，導致熔斷機制完全失效。
+        """
+        rows = await self.hub.fetch("""
+            SELECT nav, snapshot_date
+            FROM portfolio_health
+            ORDER BY snapshot_date DESC
+            LIMIT 30
+        """)
+
+        if not rows:
+            return 0.0, 0.0
+
+        navs = [float(r['nav']) for r in rows]
+
+        # 從高點回落（drawdown）：以過去 30 天的最高 NAV 為基準
+        peak_nav = max(navs)
+        drawdown = (peak_nav - nav) / peak_nav if peak_nav > nav else 0.0
+
+        # 單日損益率：與最近一筆快照比較
+        prev_nav     = navs[0] if navs else nav
+        daily_pnl_pct = (nav - prev_nav) / prev_nav if prev_nav > 0 else 0.0
+
+        return round(drawdown, 4), round(daily_pnl_pct, 4)
+
     async def run(self, trade_date: Optional[date] = None) -> dict:
         """執行部位控管，產生組合健康快照"""
         if trade_date is None:
             trade_date = date.today()
 
         positions = await self.get_open_positions()
-        nav_data = await self.calc_nav(positions)
-        nav = nav_data['nav']
+        nav_data  = await self.calc_nav(positions)
+        nav       = nav_data['nav']
 
         # 取得宏觀環境
         regime_row = await self.hub.fetchrow("""
@@ -110,31 +138,32 @@ class PositionManager:
             WHERE trade_date <= $1
             ORDER BY trade_date DESC LIMIT 1
         """, trade_date)
-        regime = regime_row['regime'] if regime_row else 'CHOPPY'
+        regime = regime_row['regime']    if regime_row else 'CHOPPY'
         mrs    = float(regime_row['mrs_score']) if regime_row else 50.0
 
         # 曝險上限
-        max_exposure = EXPOSURE_LEVELS.get(regime, 0.40)
+        max_exposure   = EXPOSURE_LEVELS.get(regime, 0.40)
         exposure_level = min(5, max(1, int(nav_data['gross_exposure_pct'] / 0.20) + 1))
 
         # VaR
         var_95 = self.calc_var_95(positions, nav)
 
-        # 熔斷檢查（簡化：假設 drawdown = 0, daily_pnl = 0）
-        drawdown = 0.0
-        daily_pnl_pct = 0.0
+        # [BUG FIX] 熔斷：改為從 DB 計算真實的 drawdown 和 daily_pnl_pct，
+        # 不再 hardcode 為 0，熔斷機制才能實際運作。
+        drawdown, daily_pnl_pct = await self._calc_drawdown_and_daily_pnl(nav)
         circuit, circuit_reason = self.check_circuit_breaker(drawdown, daily_pnl_pct)
 
         result = {
             **nav_data,
-            'snapshot_date':           trade_date,
-            'exposure_level':          exposure_level,
-            'drawdown_from_peak':      drawdown,
-            'portfolio_var_95':        var_95,
+            'snapshot_date':             trade_date,
+            'exposure_level':            exposure_level,
+            'drawdown_from_peak':        drawdown,
+            'daily_pnl_pct':             daily_pnl_pct,
+            'portfolio_var_95':          var_95,
             'circuit_breaker_triggered': circuit,
-            'circuit_breaker_reason':  circuit_reason,
-            'regime_snapshot':         regime,
-            'mrs_snapshot':            mrs,
+            'circuit_breaker_reason':    circuit_reason,
+            'regime_snapshot':           regime,
+            'mrs_snapshot':              mrs,
         }
 
         # 寫入 PostgreSQL
@@ -142,10 +171,10 @@ class PositionManager:
             INSERT INTO portfolio_health (
                 snapshot_date, nav, cash_amount, stock_market_value,
                 gross_exposure_pct, exposure_level,
-                drawdown_from_peak, portfolio_var_95,
+                drawdown_from_peak, daily_pnl_pct, portfolio_var_95,
                 circuit_breaker_triggered, circuit_breaker_reason,
                 regime_snapshot, mrs_snapshot
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (snapshot_date) DO UPDATE SET
                 nav                       = EXCLUDED.nav,
                 cash_amount               = EXCLUDED.cash_amount,
@@ -153,6 +182,7 @@ class PositionManager:
                 gross_exposure_pct        = EXCLUDED.gross_exposure_pct,
                 exposure_level            = EXCLUDED.exposure_level,
                 drawdown_from_peak        = EXCLUDED.drawdown_from_peak,
+                daily_pnl_pct             = EXCLUDED.daily_pnl_pct,
                 portfolio_var_95          = EXCLUDED.portfolio_var_95,
                 circuit_breaker_triggered = EXCLUDED.circuit_breaker_triggered,
                 circuit_breaker_reason    = EXCLUDED.circuit_breaker_reason,
@@ -166,6 +196,7 @@ class PositionManager:
             nav_data['gross_exposure_pct'],
             exposure_level,
             drawdown,
+            daily_pnl_pct,
             var_95,
             circuit,
             circuit_reason,
@@ -181,7 +212,7 @@ class PositionManager:
         )
 
         logger.info(
-            "部位控管完成：NAV=%.0f 曝險=%.1f%% 熔斷=%s",
-            nav, nav_data['gross_exposure_pct'] * 100, circuit
+            "部位控管完成：NAV=%.0f 曝險=%.1f%% 回撤=%.1f%% 熔斷=%s",
+            nav, nav_data['gross_exposure_pct'] * 100, drawdown * 100, circuit
         )
         return result

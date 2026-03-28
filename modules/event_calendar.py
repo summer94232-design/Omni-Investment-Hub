@@ -51,44 +51,45 @@ class EventCalendar:
         if cached:
             return cached
 
+        # [BUG FIX] 原本寫了兩個 BETWEEN 條件，語義重疊且容易造成漏抓或重複。
+        # 三個窗口可用一個連續區間完整覆蓋：
+        #   事後窗口起點 = trade_date - 2 days
+        #   事前窗口終點 = trade_date + 5 days
+        # 因此只需一個 BETWEEN $1 AND $2 即可，再由 Python 端依 days_to_event 分類窗口。
+        window_start = trade_date - timedelta(days=2)   # 事後：-2 天
+        window_end   = trade_date + timedelta(days=5)   # 事前：+5 天
+
         rows = await self.hub.fetch("""
             SELECT event_date, event_type, name, impact_level,
                    affected_tickers, pre_rule, during_rule, post_rule
             FROM calendar_events
-            WHERE (
-                event_date BETWEEN $1 AND $2
-                OR event_date BETWEEN $3 AND $1
-            )
-            AND impact_level >= 3
-        """,
-            trade_date,
-            trade_date + timedelta(days=5),   # 事前窗口
-            trade_date - timedelta(days=2),    # 事後窗口
-        )
+            WHERE event_date BETWEEN $1 AND $2
+              AND impact_level >= 3
+        """, window_start, window_end)
 
         active_rules = []
         for row in rows:
-            r = dict(row)
-            days_to_event = (r['event_date'] - trade_date).days
+            r              = dict(row)
+            days_to_event  = (r['event_date'] - trade_date).days
 
             if days_to_event > 0:
                 window = 'PRE'
-                rule = r['pre_rule']
+                rule   = r['pre_rule']
             elif days_to_event == 0:
                 window = 'DURING'
-                rule = r['during_rule']
+                rule   = r['during_rule']
             else:
                 window = 'POST'
-                rule = r['post_rule']
+                rule   = r['post_rule']
 
             active_rules.append({
-                'event_name':   r['name'],
-                'event_type':   r['event_type'],
-                'event_date':   str(r['event_date']),
+                'event_name':    r['name'],
+                'event_type':    r['event_type'],
+                'event_date':    str(r['event_date']),
                 'days_to_event': days_to_event,
-                'window':       window,
-                'rule':         rule,
-                'impact_level': r['impact_level'],
+                'window':        window,
+                'rule':          rule,
+                'impact_level':  r['impact_level'],
             })
 
         await self.hub.cache.set(cache_key, active_rules, ttl=rk.TTL_24H)
@@ -104,6 +105,7 @@ class EventCalendar:
         pre_rule: Optional[dict] = None,
     ) -> int:
         """新增財經事件"""
+        import json
         row = await self.hub.fetchrow("""
             INSERT INTO calendar_events (
                 event_date, event_type, name,
@@ -116,7 +118,7 @@ class EventCalendar:
             name,
             impact_level,
             affected_tickers or [],
-            __import__('json').dumps(pre_rule) if pre_rule else None,
+            json.dumps(pre_rule) if pre_rule else None,
         )
         logger.info("新增事件：%s %s", event_date, name)
         return row['id']
@@ -126,19 +128,18 @@ class EventCalendar:
         if trade_date is None:
             trade_date = date.today()
 
-        upcoming = await self.get_upcoming_events(7, trade_date)
-        active   = await self.get_active_rules(trade_date=trade_date)
-
-        high_impact = [e for e in upcoming if e['impact_level'] >= 4]
+        upcoming     = await self.get_upcoming_events(7, trade_date)
+        active       = await self.get_active_rules(trade_date=trade_date)
+        high_impact  = [e for e in upcoming if e['impact_level'] >= 4]
 
         logger.info(
             "事件日曆：未來7日 %d 個事件，%d 個高影響力",
-            len(upcoming), len(high_impact)
+            len(upcoming), len(high_impact),
         )
         return {
-            'trade_date':       str(trade_date),
-            'upcoming_count':   len(upcoming),
+            'trade_date':        str(trade_date),
+            'upcoming_count':    len(upcoming),
             'high_impact_count': len(high_impact),
-            'active_rules':     len(active),
-            'upcoming_events':  upcoming,
+            'active_rules':      len(active),
+            'upcoming_events':   upcoming,
         }

@@ -20,13 +20,13 @@ class ExitEngine:
     """模組⑦ 主動出場管理引擎：五段式狀態機"""
 
     def __init__(self, hub: DataHub, finmind: FinMindAPI):
-        self.hub = hub
+        self.hub     = hub
         self.finmind = finmind
 
     def _calc_atr(self, price_df, period: int = 20) -> Optional[float]:
         if price_df.empty or len(price_df) < period:
             return None
-        df = price_df.sort_values('date').tail(period + 1)
+        df     = price_df.sort_values('date').tail(period + 1)
         highs  = df['max'].astype(float)
         lows   = df['min'].astype(float)
         closes = df['close'].astype(float).shift(1)
@@ -49,7 +49,7 @@ class ExitEngine:
         highest = float(position['highest_price_seen'] or current_price)
         trail   = position['trailing_stop_price']
 
-        # 停損觸發
+        # 停損觸發（優先判斷，任何狀態皆適用）
         if current_price <= stop:
             return 'STOPPED_OUT', 'STOP_LOSS'
 
@@ -71,7 +71,15 @@ class ExitEngine:
         if state == 'S4_TRAILING_STOP':
             trail_pct = float(position.get('trail_pct') or 0.15)
             new_trail = highest * (1 - trail_pct)
-            if trail and current_price <= float(trail):
+
+            # [BUG FIX] 原本只用資料庫中的舊 trail 值判斷，new_trail 計算了卻沒用到。
+            # 停損線只能往上移（棘輪效果），取新舊值的最大值作為有效停損線。
+            if trail is not None:
+                effective_trail = max(float(trail), new_trail)
+            else:
+                effective_trail = new_trail
+
+            if current_price <= effective_trail:
                 return 'S5_ACTIVE_EXIT', 'TRAILING_STOP'
             return state, ''
 
@@ -91,7 +99,7 @@ class ExitEngine:
             raise ValueError(f"找不到持倉 {position_id}")
 
         position = dict(row)
-        ticker = position['ticker'].strip()  # ← 修復：移除 CHAR(6) 空格
+        ticker   = position['ticker'].strip()  # 移除 CHAR(6) 補空格
 
         price_df = await self.finmind.get_stock_price(
             ticker, str(trade_date.replace(day=1))
@@ -107,9 +115,13 @@ class ExitEngine:
             position['state'], cur_price, position
         )
 
+        # 更新歷史最高價與 trailing stop（棘輪：只升不降）
         highest   = max(float(position.get('highest_price_seen') or cur_price), cur_price)
         trail_pct = float(position.get('trail_pct') or 0.15)
         new_trail = round(highest * (1 - trail_pct), 4)
+        old_trail = position.get('trailing_stop_price')
+        # [BUG FIX] 寫回 DB 的 trailing_stop 也取棘輪最大值，與判斷邏輯一致
+        effective_trail = round(max(float(old_trail), new_trail), 4) if old_trail else new_trail
 
         avg_cost       = float(position['avg_cost'] or position['entry_price'])
         unrealized_pnl = (cur_price - avg_cost) * position['current_shares']
@@ -131,7 +143,7 @@ class ExitEngine:
             WHERE id = $10
         """,
             new_state,
-            new_trail,
+            effective_trail,     # [BUG FIX] 寫回棘輪後的有效 trailing stop
             highest,
             round(unrealized_pnl, 2),
             round(r_multiple, 3),
@@ -148,7 +160,7 @@ class ExitEngine:
             'state':          new_state,
             'prev_state':     position['state'],
             'current_price':  cur_price,
-            'trailing_stop':  new_trail,
+            'trailing_stop':  effective_trail,
             'unrealized_pnl': round(unrealized_pnl, 2),
             'r_multiple':     round(r_multiple, 3),
             'exit_reason':    exit_reason or None,

@@ -1,9 +1,10 @@
 # modules/walk_forward.py
-import logging
 import json
+import logging
 from datetime import date
 from typing import Optional
 from datahub.data_hub import DataHub
+from datahub import redis_keys as rk
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,9 @@ class WalkForward:
 
         mean_s = sum(scores) / len(scores)
         mean_r = sum(returns) / len(returns)
-        cov = sum((s - mean_s) * (r - mean_r) for s, r in zip(scores, returns))
-        std_s = (sum((s - mean_s) ** 2 for s in scores) / len(scores)) ** 0.5
-        std_r = (sum((r - mean_r) ** 2 for r in returns) / len(returns)) ** 0.5
+        cov    = sum((s - mean_s) * (r - mean_r) for s, r in zip(scores, returns))
+        std_s  = (sum((s - mean_s) ** 2 for s in scores) / len(scores)) ** 0.5
+        std_r  = (sum((r - mean_r) ** 2 for r in returns) / len(returns)) ** 0.5
 
         if std_s == 0 or std_r == 0:
             return 0.0
@@ -73,7 +74,7 @@ class WalkForward:
         weights  = {k: round(max(v, 0.01) / total_ic, 3) for k, v in ic_scores.items()}
 
         # 正規化
-        total = sum(weights.values())
+        total   = sum(weights.values())
         weights = {k: round(v / total, 3) for k, v in weights.items()}
         return weights
 
@@ -88,15 +89,15 @@ class WalkForward:
         if len(records) < 20:
             logger.warning("歷史資料不足（%d 筆），使用預設權重", len(records))
             return {
-                'status':             'INSUFFICIENT_DATA',
-                'records_count':      len(records),
+                'status':              'INSUFFICIENT_DATA',
+                'records_count':       len(records),
                 'recommended_weights': DEFAULT_WEIGHTS,
-                'recommendation':     'ADJUST',
-                'message':            '歷史資料不足，維持預設權重',
+                'recommendation':      'ADJUST',
+                'message':             '歷史資料不足，維持預設權重',
             }
 
         # 計算各因子 IC
-        factors  = ['momentum', 'chip', 'fundamental', 'valuation']
+        factors   = ['momentum', 'chip', 'fundamental', 'valuation']
         ic_scores = {f: self._calc_factor_ic(records, f) for f in factors}
 
         # 建議權重
@@ -104,7 +105,7 @@ class WalkForward:
 
         # 績效統計
         trades_with_r = [r for r in records if r.get('r_multiple') is not None]
-        avg_r  = sum(float(r['r_multiple']) for r in trades_with_r) / max(len(trades_with_r), 1)
+        avg_r    = sum(float(r['r_multiple']) for r in trades_with_r) / max(len(trades_with_r), 1)
         win_rate = len([r for r in trades_with_r if float(r['r_multiple']) > 0]) / max(len(trades_with_r), 1)
 
         recommendation = 'DEPLOY' if avg_r > 0.5 and win_rate > 0.40 else 'ADJUST'
@@ -134,9 +135,13 @@ class WalkForward:
             f"Walk-Forward 驗證 {trade_date}，{len(records)} 筆資料",
         )
 
-        # 更新 Redis
+        # [BUG FIX] 原本 ttl=0 代表永不過期，Redis key 不會自動清除。
+        # 改為 TTL_24H（24小時），確保每次排程執行後快取能正常更新。
+        # 同時改用 redis_keys 統一管理 key 名稱，避免各模組拼字不一致。
         await self.hub.cache.set(
-            'wf:weights:current', suggested, ttl=0
+            rk.key_wf_weights_current(),
+            suggested,
+            ttl=rk.TTL_24H,
         )
 
         logger.info("Walk-Forward 完成：建議=%s 權重=%s", recommendation, suggested)
