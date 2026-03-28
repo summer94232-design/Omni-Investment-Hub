@@ -234,7 +234,7 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
           <button class="btn sm" onclick="renderSelection()">套用</button>
         </div>
       </div>
-      <!-- [v3] 基差過濾狀態提示 -->
+      <!-- [v3] 基差警告提示 -->
       <div id="basis-warning" style="display:none;background:#3d2109;border:1px solid #744210;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#f6ad55"></div>
       <div id="selection-content"></div>
     </div>
@@ -547,6 +547,7 @@ function post(url,body){
 /* ── 載入資料 ── */
 function loadData(callback){
   fetch('/api/data').then(function(r){ return r.json(); }).then(function(d){
+    if(d.error){ toast('後端錯誤：'+d.error, true); if(callback) callback(); return; }
     DATA = d;
     document.getElementById('last-updated').textContent =
       '最後更新：' + new Date().toLocaleTimeString('zh-TW');
@@ -585,91 +586,87 @@ function renderOverview(){
     '<div class="metric"><span class="label">曝險比例</span><span class="val '+expCls+'">'+expPct+'%</span></div>'+
     '<div class="metric"><span class="label">VaR 95%</span><span class="val warn">'+(h.portfolio_var_95?(h.portfolio_var_95*100).toFixed(2)+'%':'N/A')+'</span></div>'+
     '<div class="metric"><span class="label">熔斷狀態</span><span class="val '+(h.circuit_breaker_triggered?'bad':'good')+'">'+(h.circuit_breaker_triggered?'⚠ 觸發':'✓ 正常')+'</span></div>'+
-    '<div class="metric"><span class="label">最大回撤</span><span class="val warn">'+(h.drawdown_from_peak?(h.drawdown_from_peak*100).toFixed(1)+'%':'0.0%')+'</span></div>';
-
-  /* [v3] 流動性警示卡 */
-  renderLiquidityCard();
+    '<div class="metric"><span class="label">最大回撤</span><span class="val warn">'+(h.drawdown_from_peak?(h.drawdown_from_peak*100).toFixed(1)+'%':'N/A')+'</span></div>';
 
   /* 持倉快照 */
-  var posRows = (DATA.positions||[]).slice(0,5).map(function(p){
-    var r = p.r_multiple_current||0;
-    return '<tr>'+
-      '<td>'+String(p.ticker||'').trim()+'</td>'+
-      '<td><span class="tag">'+stateLabel(p.state)+'</span></td>'+
-      '<td>'+(p.entry_price||'-')+'</td>'+
-      '<td>'+(p.current_stop_price||'-')+'</td>'+
-      '<td class="'+(r>=0?'good':'bad')+'" style="font-weight:600">'+Number(r).toFixed(2)+'R</td>'+
-      '<td class="'+(( p.unrealized_pnl||0)>=0?'good':'bad')+'">'+Number(p.unrealized_pnl||0).toLocaleString()+'</td>'+
-      '</tr>';
-  }).join('')||'<tr><td colspan="6" style="color:#718096;text-align:center">無持倉</td></tr>';
-  document.getElementById('pos-preview').innerHTML =
-    '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損</th><th>R倍數</th><th>損益</th></tr>'+posRows+'</table>';
+  var pos = DATA.positions || [];
+  if(!pos.length){
+    document.getElementById('pos-preview').innerHTML = '<p style="color:#718096;font-size:12px">目前無持倉</p>';
+  } else {
+    var rows = pos.slice(0,5).map(function(p){
+      var r = p.r_multiple_current||0;
+      return '<tr>'+
+        '<td>'+String(p.ticker||'').trim()+'</td>'+
+        '<td><span class="tag">'+stateLabel(p.state)+'</span></td>'+
+        '<td class="'+(r>=0?'good':'bad')+'">'+Number(r).toFixed(2)+'R</td>'+
+        '<td class="'+((p.unrealized_pnl||0)>=0?'good':'bad')+'">'+Number(p.unrealized_pnl||0).toLocaleString()+'</td>'+
+        '</tr>';
+    }).join('');
+    document.getElementById('pos-preview').innerHTML =
+      '<table><tr><th>股票</th><th>狀態</th><th>R倍數</th><th>損益</th></tr>'+rows+'</table>';
+  }
 
   /* 籌碼監控 */
-  var chipRows = (DATA.chips||[]).map(function(c){
-    var sc = c.crs_total||0;
-    return '<tr>'+
-      '<td>'+String(c.ticker||'').trim()+'</td>'+
-      '<td class="'+(sc>=60?'good':sc>=40?'neu':'bad')+'">'+Number(sc).toFixed(1)+'</td>'+
-      '<td>'+(c.three_way_resonance?'<span class="good">✓ 三向</span>':'-')+'</td>'+
-      '</tr>';
-  }).join('')||'<tr><td colspan="3" style="color:#718096;text-align:center">無資料</td></tr>';
-  document.getElementById('chip-content').innerHTML =
-    '<table><tr><th>股票</th><th>CRS 分</th><th>共振</th></tr>'+chipRows+'</table>';
+  var chips = DATA.chips || [];
+  if(!chips.length){
+    document.getElementById('chip-content').innerHTML = '<p style="color:#718096;font-size:12px">無籌碼資料</p>';
+  } else {
+    var rows2 = chips.map(function(c){
+      var res = c.three_way_resonance ? '<span class="chip-alert">共振</span>' : '';
+      return '<tr>'+
+        '<td>'+String(c.ticker||'').trim()+res+'</td>'+
+        '<td class="'+(c.crs_total>=0?'good':'bad')+'">'+Number(c.crs_total||0).toFixed(1)+'</td>'+
+        '</tr>';
+    }).join('');
+    document.getElementById('chip-content').innerHTML =
+      '<table><tr><th>股票</th><th>CRS 總分</th></tr>'+rows2+'</table>';
+  }
 
   /* 訊號日誌 */
-  var sigRows = (DATA.signals||[]).slice(0,5).map(function(s){
-    var t = s.logged_at?new Date(s.logged_at).toLocaleString('zh-TW'):'-';
-    return '<tr>'+
-      '<td style="font-size:11px;color:#718096">'+t+'</td>'+
-      '<td>'+decisionTypeLabel(s.decision_type)+'</td>'+
-      '<td>'+String(s.ticker||'').trim()+'</td>'+
-      '<td>'+signalSourceLabel(s.signal_source)+'</td>'+
-      '</tr>';
-  }).join('')||'<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
-  document.getElementById('sig-preview').innerHTML =
-    '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>'+sigRows+'</table>';
+  var sigs = (DATA.signals||[]).slice(0,5);
+  if(!sigs.length){
+    document.getElementById('sig-preview').innerHTML = '<p style="color:#718096;font-size:12px">無訊號記錄</p>';
+  } else {
+    var rows3 = sigs.map(function(s){
+      var t = s.logged_at?new Date(s.logged_at).toLocaleString('zh-TW'):'-';
+      return '<tr>'+
+        '<td style="font-size:11px;color:#718096">'+t+'</td>'+
+        '<td>'+decisionTypeLabel(s.decision_type)+'</td>'+
+        '<td>'+String(s.ticker||'').trim()+'</td>'+
+        '</tr>';
+    }).join('');
+    document.getElementById('sig-preview').innerHTML =
+      '<table><tr><th>時間</th><th>類型</th><th>股票</th></tr>'+rows3+'</table>';
+  }
+
+  /* 流動性警示 */
+  renderLiquidityCard();
 }
 
 /* ── [v3] 台指期基差卡 ── */
 function renderBasisCard(reg){
-  var tx   = reg.tx_futures_price;
-  var tsec = reg.tsec_index_price;
-  var divs = reg.dividend_adjustment || 0;
-  var card = document.getElementById('card-basis');
-
-  if(!tx || !tsec || parseFloat(tsec)<=0){
-    document.getElementById('basis-content').innerHTML =
-      '<p style="color:#718096;font-size:12px">無期貨資料（收盤後 / API 未配置）</p>'+
-      '<div class="metric"><span class="label">過濾狀態</span><span class="basis-ok">不過濾（資料缺失）</span></div>';
-    card.className = 'card';
+  var tx   = parseFloat(reg.tx_futures_price  || 0);
+  var tsec = parseFloat(reg.tsec_index_price  || 0);
+  if(!tx || !tsec){
+    document.getElementById('basis-content').innerHTML = '<p style="color:#718096;font-size:12px">無基差資料</p>';
     return;
   }
-
-  var basis     = (parseFloat(tx) - (parseFloat(tsec) - parseFloat(divs))) / parseFloat(tsec);
-  var basisPct  = (basis*100).toFixed(2);
-  var basisCls, basisLabel, filterStatus;
-
+  var basis    = (tx - tsec) / tsec;
+  var basisPct = (basis * 100).toFixed(2);
+  var basisCls, filterStatus;
   if(basis < -0.015){
-    basisCls     = 'basis-hard';
-    basisLabel   = '⛔ HARD BLOCK（< -1.5%）';
-    filterStatus = '所有進場訊號分數強制歸零';
-    card.className = 'card danger-border';
+    basisCls    = 'basis-hard';
+    filterStatus = '⛔ HARD BLOCK';
   } else if(basis < -0.008){
-    basisCls     = 'basis-soft';
-    basisLabel   = '⚠ SOFT PENALTY（< -0.8%）';
-    filterStatus = '個股分數 × 0.80 懲罰';
-    card.className = 'card warn-border';
+    basisCls    = 'basis-soft';
+    filterStatus = '⚠ SOFT PENALTY (×0.80)';
   } else {
-    basisCls     = 'basis-ok';
-    basisLabel   = '✓ 正常（≥ -0.8%）';
-    filterStatus = '不過濾';
-    card.className = 'card';
+    basisCls    = 'basis-ok';
+    filterStatus = '✓ 正常進場';
   }
-
   document.getElementById('basis-content').innerHTML =
-    '<div style="margin-bottom:10px"><span class="'+basisCls+'">'+basisLabel+'</span></div>'+
-    '<div class="metric"><span class="label">Normalized Basis</span><span class="val '+(basis<-0.015?'bad':basis<-0.008?'warn':'good')+'">'+basisPct+'%</span></div>'+
+    '<div style="margin-bottom:12px"><span class="'+basisCls+'">基差 '+basisPct+'%</span></div>'+
+    '<div class="metric"><span class="label">基差百分比</span><span class="val '+(basis<-0.008?'warn':'good')+'">'+basisPct+'%</span></div>'+
     '<div class="metric"><span class="label">台指期（TX）</span><span class="val neu">'+Number(tx).toLocaleString()+'</span></div>'+
     '<div class="metric"><span class="label">加權指數（TSEC）</span><span class="val neu">'+Number(tsec).toLocaleString()+'</span></div>'+
     '<div class="metric"><span class="label">進場過濾效果</span><span class="val '+(basis<-0.008?'warn':'good')+'">'+filterStatus+'</span></div>';
@@ -679,14 +676,11 @@ function renderBasisCard(reg){
 function renderLiquidityCard(){
   var liqSigs  = DATA.liquidity_signals || [];
   var attr     = DATA.attribution || {};
-  var regFb    = attr.regime_ev_feedback || {};
 
-  /* 模擬流動性狀態（實際值來自後端） */
   var basisPanic  = false;
   var volumeWarn  = false;
   var recentTrig  = liqSigs.length > 0;
 
-  /* 從最近黑天鵝訊號判斷 */
   liqSigs.forEach(function(s){
     if(s.notes && s.notes.indexOf('基差背離')>=0) basisPanic = true;
     if(s.notes && s.notes.indexOf('成交量')>=0)   volumeWarn = true;
@@ -694,7 +688,6 @@ function renderLiquidityCard(){
 
   var html = '';
 
-  /* 基差持續計時 */
   html += '<div class="liq-indicator">'+
     '<div class="liq-dot '+(basisPanic?'bad':'ok')+'"></div>'+
     '<div style="flex:1">'+
@@ -704,7 +697,6 @@ function renderLiquidityCard(){
     '</div>'+
   '</div>';
 
-  /* 成交量衰退 */
   html += '<div class="liq-indicator">'+
     '<div class="liq-dot '+(volumeWarn?'warn':'ok')+'"></div>'+
     '<div style="flex:1">'+
@@ -714,7 +706,6 @@ function renderLiquidityCard(){
     '</div>'+
   '</div>';
 
-  /* 最近觸發記錄 */
   if(recentTrig){
     html += '<div class="section-sep"></div>'+
       '<div style="font-size:11px;color:#718096;margin-bottom:6px">近7日觸發記錄（'+liqSigs.length+'筆）</div>';
@@ -744,7 +735,6 @@ function renderPositionsFull(){
       '<td>'+(p.current_stop_price||'-')+'</td>'+
       '<td class="'+(r>=0?'good':'bad')+'" style="font-weight:600">'+Number(r).toFixed(2)+'R</td>'+
       '<td class="'+((p.unrealized_pnl||0)>=0?'good':'bad')+'">'+Number(p.unrealized_pnl||0).toLocaleString()+'</td>'+
-      /* [v3] 動態 ATR 倍數 */
       '<td style="color:#90cdf4;font-size:11px">'+atrMlt+'</td>'+
       '<td>'+
         '<button class="btn sm red" style="margin-right:4px" onclick="closePos(\''+p.id+'\','+p.entry_price+')">平倉</button>'+
@@ -754,7 +744,6 @@ function renderPositionsFull(){
   document.getElementById('positions-full').innerHTML =
     '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損</th><th>R倍數</th><th>損益</th><th>S1 ATR倍</th><th>操作</th></tr>'+rows+'</table>';
 
-  /* [v3] 已平倉個股 Alpha */
   renderClosedAlpha();
 }
 
@@ -793,7 +782,6 @@ function renderClosedAlpha(){
 function renderSelection(){
   var threshold = parseFloat(document.getElementById('score-threshold').value || 60);
 
-  /* [v3] 基差警告提示 */
   var reg = DATA.regime || {};
   var basisWarn = document.getElementById('basis-warning');
   if(reg.tx_futures_price && reg.tsec_index_price){
@@ -811,12 +799,10 @@ function renderSelection(){
     basisWarn.style.display = 'none';
   }
 
-  /* 選股表格 */
   var rows = (DATA.stocks||[]).map(function(s){
     var sc   = s.total_score || 0;
     var pass = sc >= threshold;
     var pct  = Math.min(sc, 100);
-    /* [v3] 基差過濾原因 */
     var basisTag = '';
     if(s.basis_filter_reason){
       if(s.basis_filter_reason.indexOf('HARD')>=0)
@@ -824,7 +810,6 @@ function renderSelection(){
       else
         basisTag = '<span class="basis-soft" style="margin-left:4px">⚠</span>';
     }
-    /* [v3] 群聚加分含 Beta 倍率 */
     var bonusStr = '-';
     if(s.sector_bonus && parseFloat(s.sector_bonus)>0){
       var mult = s.sector_beta_mult ? Number(s.sector_beta_mult).toFixed(1) : '1.0';
@@ -843,7 +828,6 @@ function renderSelection(){
   document.getElementById('selection-content').innerHTML =
     '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th><th>產業</th><th>群聚加分</th></tr>'+rows+'</table>';
 
-  /* [v3] 產業群聚 Beta 倍率表 */
   renderSectorCluster();
   loadWatchlist();
 }
@@ -879,7 +863,8 @@ function renderSectorCluster(){
    [v3] 歸因分析頁
 ══════════════════════════════════════════════ */
 function loadAttribution(){
-  var days = document.getElementById('attr-days') ? document.getElementById('attr-days').value : 30;
+  var days = document.getElementById('attr-days') ?
+    document.getElementById('attr-days').value : 30;
   document.getElementById('alpha-source-content').innerHTML = '<p style="color:#718096">載入中...</p>';
   fetch('/api/attribution?days='+days)
     .then(function(r){ return r.json(); })
@@ -933,7 +918,6 @@ function renderAlphaSource(d){
       '<div style="font-size:11px;color:#718096">總損益</div><div style="font-size:18px;font-weight:700;color:'+((d.total_pnl||0)>=0?'#68d391':'#fc8181')+'">'+Number(d.total_pnl||0).toLocaleString()+'</div></div>'+
     '</div>';
 
-  /* 建議 */
   if(d.suggestions && d.suggestions.length){
     html += '<div style="margin-top:12px">';
     d.suggestions.forEach(function(s){
@@ -1008,13 +992,13 @@ function renderPerTradeAlpha(d){
     return;
   }
   var sorted = trades.slice().sort(function(a,b){ return b.individual_alpha - a.individual_alpha; });
+  var srcCls = {ALPHA:'src-alpha', BETA:'src-beta', SECTOR_BETA:'src-sector', MIXED:'src-mixed'};
   var rows = sorted.slice(0,20).map(function(t){
     var alpha   = parseFloat(t.individual_alpha || 0);
     var barW    = Math.min(Math.abs(alpha)*20, 50);
     var barHtml = alpha >= 0
       ? '<div class="alpha-bar-wrap"><div class="alpha-bar-pos" style="width:'+barW+'px"></div></div>'
       : '<div class="alpha-bar-wrap"><div class="alpha-bar-neg" style="width:'+barW+'px"></div></div>';
-    var srcCls = {ALPHA:'src-alpha', BETA:'src-beta', SECTOR_BETA:'src-sector', MIXED:'src-mixed'};
     return '<tr>'+
       '<td style="font-weight:600">'+String(t.ticker||'').trim()+'</td>'+
       '<td class="'+(t.r>=0?'good':'bad')+'">'+Number(t.r||0).toFixed(2)+'R</td>'+
@@ -1111,7 +1095,6 @@ function runEV(){
   });
 }
 
-/* [v3 MODIFIED] 黑天鵝 — 顯示實際減倉結果 */
 function runBlackSwan(){
   document.getElementById('bs-result').innerHTML = '<p style="color:#718096;margin-top:12px">檢查中...</p>';
   fetch('/api/black-swan',{method:'POST'}).then(function(r){ return r.json(); }).then(function(r){
@@ -1125,7 +1108,6 @@ function runBlackSwan(){
       html += '<div style="background:#2d1a1a;border:1px solid #742a2a;border-radius:6px;padding:10px;margin-top:8px">';
       html += '<div style="font-weight:600;color:#fc8181;margin-bottom:6px">'+action.scenario_name+'</div>';
       html += '<div style="font-size:12px;color:#a0aec0;margin-bottom:4px">動作：'+action.action+'</div>';
-      /* [v3] 減倉結果顯示 */
       var rr = action.reduction_result;
       if(rr && !rr.error && rr.reduced_count > 0){
         html += '<div style="font-size:12px;color:#f6ad55">'+
@@ -1243,9 +1225,12 @@ function addPosition(){
   var a = document.getElementById('ap-atr').value;
   var m = document.getElementById('ap-mult').value || 3.0;
   if(!t||!p||!s||!a){ toast('請填寫所有欄位',true); return; }
-  post('/api/add-position',{ticker:t,entry_price:p,shares:s,atr:a,atr_multiplier:m}).then(function(r){
-    if(r.ok){ toast(t+' 持倉已新增'); toggleAddForm(); loadData(); }
-  });
+  post('/api/add-position',{ticker:t,entry_price:p,shares:s,atr:a,atr_multiplier:m})
+    .then(function(r){
+      if(r.ok){ toast(t+' 持倉已新增'); toggleAddForm(); loadData(); }
+      else { toast('新增失敗：'+(r.error||'未知錯誤'),true); }
+    })
+    .catch(function(e){ toast('資料載入失敗：'+e.message,true); });
 }
 
 /* ── 觀察清單 ── */

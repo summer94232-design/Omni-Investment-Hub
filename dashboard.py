@@ -1,11 +1,15 @@
 # dashboard.py  ── v3 完整版
 import asyncio
 import json
+import logging
 import yaml
 from datetime import date, datetime
 from decimal import Decimal
 from aiohttp import web
 from datahub.data_hub import DataHub
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def serialize(obj):
@@ -108,12 +112,20 @@ async def handle_index(request):
 
 
 async def handle_api_data(request):
-    hub  = request.app['hub']
-    data = await get_dashboard_data(hub)
-    return web.Response(
-        text=json.dumps(data, default=serialize, ensure_ascii=False),
-        content_type='application/json'
-    )
+    hub = request.app['hub']
+    try:
+        data = await get_dashboard_data(hub)
+        return web.Response(
+            text=json.dumps(data, default=serialize, ensure_ascii=False),
+            content_type='application/json'
+        )
+    except Exception as e:
+        logger.exception('handle_api_data 失敗')
+        return web.Response(
+            text=json.dumps({'error': str(e)}, ensure_ascii=False),
+            content_type='application/json',
+            status=500,
+        )
 
 
 async def handle_api_settings(request):
@@ -193,9 +205,11 @@ async def handle_api_add_position(request):
         """, ticker, date.today(), entry, shares, atr, mult, stop, r)
         return web.Response(text='{"ok":true}', content_type='application/json')
     except Exception as e:
+        # ✅ 確保 except 一定回傳 JSON，不讓 aiohttp 產生 HTML 錯誤頁
         return web.Response(
-            text=json.dumps({'ok': False, 'error': str(e)}),
-            content_type='application/json', status=500,
+            text=json.dumps({'ok': False, 'error': str(e)}, ensure_ascii=False),
+            content_type='application/json',
+            status=500,
         )
 
 
