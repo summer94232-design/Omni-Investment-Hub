@@ -2,77 +2,136 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<title>Omni-Investment Hub</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Omni-Investment Hub v3</title>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f1117; color: #e2e8f0; }
-.header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
-.header h1 { font-size: 18px; font-weight: 600; color: #90cdf4; }
-.nav { display: flex; gap: 4px; }
-.nav button { background: transparent; border: 1px solid #2d3748; color: #a0aec0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-.nav button.active, .nav button:hover { background: #2b6cb0; border-color: #2b6cb0; color: white; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; padding: 20px; max-width: 1600px; margin: 0 auto; }
-.card { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 12px; padding: 20px; }
-.card-title { font-size: 13px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
-.badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 14px; font-weight: 600; }
-.BULL_TREND { background:#1c4532; color:#68d391; }
-.WEAK_BULL  { background:#2d3a1a; color:#a0d454; }
-.CHOPPY     { background:#3d2a00; color:#f6ad55; }
-.BEAR_TREND { background:#3d1515; color:#fc8181; }
-.metric { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #2d3748; }
-.metric:last-child { border-bottom: none; }
-.label { font-size: 13px; color: #718096; }
-.val { font-size: 15px; font-weight: 600; }
-.good { color:#68d391; } .warn { color:#f6ad55; } .bad { color:#fc8181; } .neu { color:#90cdf4; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 6px 8px; color: #718096; border-bottom: 1px solid #2d3748; font-weight: 500; }
-td { padding: 8px; border-bottom: 1px solid #1e2535; }
-tr:last-child td { border-bottom: none; }
-.bar-wrap { background:#2d3748; border-radius:4px; height:6px; width:80px; display:inline-block; vertical-align:middle; overflow:hidden; }
-.bar-fill { height:100%; border-radius:4px; background:#4299e1; }
-.tag { display:inline-block; padding:2px 6px; border-radius:4px; font-size:11px; background:#2d3748; color:#a0aec0; margin:1px; }
-.btn { background:#2b6cb0; color:white; border:none; padding:7px 14px; border-radius:7px; cursor:pointer; font-size:13px; white-space:nowrap; }
-.btn:hover { background:#3182ce; }
-.btn.red { background:#c53030; } .btn.red:hover { background:#e53e3e; }
-.btn.green { background:#276749; } .btn.green:hover { background:#38a169; }
-.btn.amber { background:#744210; } .btn.amber:hover { background:#d69e2e; }
-.btn.sm { padding:4px 10px; font-size:12px; }
-/* 重新整理按鈕 */
-.btn.refresh { background:#2d3748; border:1px solid #4a5568; color:#a0aec0; padding:5px 12px; border-radius:6px; font-size:12px; }
-.btn.refresh:hover { background:#4a5568; color:#e2e8f0; }
-.btn.refresh.loading { opacity:0.6; cursor:not-allowed; }
-.wide { grid-column: span 2; }
-.page { display:none; } .page.active { display:block; }
-input, select { background:#2d3748; border:1px solid #4a5568; color:#e2e8f0; padding:7px 10px; border-radius:6px; font-size:13px; width:100%; }
-input:focus, select:focus { outline:none; border-color:#4299e1; }
-.form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
-.form-label { font-size:12px; color:#718096; margin-bottom:4px; }
-.result-box { background:#2d3748; border-radius:8px; padding:14px; margin-top:12px; font-size:13px; line-height:1.8; }
-.mode-btn { padding:8px 16px; border-radius:8px; border:1px solid #4a5568; background:transparent; color:#a0aec0; cursor:pointer; font-size:13px; }
-.mode-btn.active { background:#2b6cb0; border-color:#2b6cb0; color:white; }
-.toast { position:fixed; bottom:24px; right:24px; background:#1a1d2e; border:1px solid #2d3748; padding:12px 20px; border-radius:10px; font-size:13px; z-index:999; transform:translateY(80px); transition:transform .3s; }
-.toast.show { transform:translateY(0); }
-.slider-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
-.slider-row label { font-size:13px; color:#a0aec0; min-width:160px; }
-.slider-row input[type=range] { flex:1; }
-.slider-row span { font-size:13px; color:#90cdf4; min-width:40px; text-align:right; }
-/* 最後更新時間提示 */
-#last-updated { font-size:11px; color:#4a5568; margin-left:8px; }
+/* ── 基底 ── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1117;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh}
+a{color:#63b3ed}
+
+/* ── 版面 ── */
+.header{display:flex;justify-content:space-between;align-items:center;padding:10px 20px;background:#161b27;border-bottom:1px solid #2d3748;position:sticky;top:0;z-index:100}
+.header h1{font-size:15px;font-weight:600;color:#90cdf4;letter-spacing:.5px}
+.nav{display:flex;gap:4px}
+.nav button{background:transparent;border:none;color:#718096;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;transition:all .15s}
+.nav button:hover{background:#2d3748;color:#e2e8f0}
+.nav button.active{background:#2b6cb0;color:#fff}
+.page{display:none}.page.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;padding:16px}
+.card{background:#161b27;border:1px solid #2d3748;border-radius:10px;padding:16px}
+.card.wide{grid-column:span 2}
+.card.danger-border{border-color:#c53030}
+.card.warn-border{border-color:#744210}
+.card-title{font-size:12px;font-weight:600;color:#a0aec0;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+
+/* ── 指標行 ── */
+.metric{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1a202c}
+.metric:last-child{border-bottom:none}
+.metric .label{color:#718096;font-size:12px}
+.metric .val{font-weight:600;font-size:13px}
+.good{color:#68d391}.warn{color:#f6ad55}.bad{color:#fc8181}.neu{color:#90cdf4}
+
+/* ── Badge / Tag ── */
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.5px}
+.badge.BULL_TREND{background:#1c4532;color:#68d391}
+.badge.WEAK_BULL{background:#1a365d;color:#90cdf4}
+.badge.CHOPPY{background:#322659;color:#d6bcfa}
+.badge.BEAR_TREND{background:#742a2a;color:#fc8181}
+.tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;background:#2d3748;color:#a0aec0}
+
+/* ── 基差 Badge ── */
+.basis-ok{background:#1c4532;color:#68d391;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700}
+.basis-soft{background:#744210;color:#f6ad55;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700}
+.basis-hard{background:#742a2a;color:#fc8181;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+/* ── Alpha 來源 Badge ── */
+.src-alpha{background:#1a365d;color:#90cdf4;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700}
+.src-beta{background:#2d3748;color:#a0aec0;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700}
+.src-sector{background:#322659;color:#d6bcfa;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700}
+.src-mixed{background:#1a202c;color:#718096;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700}
+
+/* ── 表格 ── */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{color:#718096;font-weight:600;text-align:left;padding:5px 6px;border-bottom:1px solid #2d3748;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:6px 6px;border-bottom:1px solid #1a202c;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#1a202c}
+
+/* ── Bar ── */
+.bar-wrap{display:inline-block;width:60px;height:6px;background:#2d3748;border-radius:3px;vertical-align:middle;margin-right:4px}
+.bar-fill{display:inline-block;height:6px;background:#2b6cb0;border-radius:3px;transition:width .3s}
+
+/* ── 按鈕 ── */
+.btn{background:#2b6cb0;color:#fff;border:none;padding:7px 14px;border-radius:7px;cursor:pointer;font-size:13px;white-space:nowrap;transition:background .15s}
+.btn:hover{background:#3182ce}
+.btn.red{background:#c53030}.btn.red:hover{background:#e53e3e}
+.btn.green{background:#276749}.btn.green:hover{background:#38a169}
+.btn.amber{background:#744210}.btn.amber:hover{background:#d69e2e}
+.btn.gray{background:#2d3748;color:#a0aec0;border:1px solid #4a5568}.btn.gray:hover{background:#4a5568}
+.btn.sm{padding:4px 10px;font-size:12px}
+.btn.refresh{background:#2d3748;border:1px solid #4a5568;color:#a0aec0;padding:5px 12px;border-radius:6px;font-size:12px}
+.btn.refresh:hover{background:#4a5568;color:#e2e8f0}
+
+/* ── 表單 ── */
+input,select{background:#2d3748;border:1px solid #4a5568;color:#e2e8f0;padding:7px 10px;border-radius:6px;font-size:13px;width:100%}
+input:focus,select:focus{outline:none;border-color:#4299e1}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.form-label{font-size:12px;color:#718096;margin-bottom:4px}
+.result-box{background:#2d3748;border-radius:8px;padding:14px;margin-top:12px;font-size:13px;line-height:1.8}
+.mode-btn{padding:8px 16px;border-radius:8px;border:1px solid #4a5568;background:transparent;color:#a0aec0;cursor:pointer;font-size:13px;transition:all .15s}
+.mode-btn.active{background:#2b6cb0;border-color:#2b6cb0;color:#fff}
+
+/* ── Slider ── */
+.slider-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.slider-row label{font-size:13px;color:#a0aec0;min-width:180px}
+.slider-row input[type=range]{flex:1}
+.slider-row span{font-size:13px;color:#90cdf4;min-width:44px;text-align:right}
+
+/* ── Regime ATR 對照表 ── */
+.atr-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.atr-table th{color:#718096;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:6px 8px;border-bottom:1px solid #2d3748;text-align:left}
+.atr-table td{padding:6px 8px;border-bottom:1px solid #1a202c}
+.atr-table td input{width:70px;padding:4px 8px;font-size:13px}
+.atr-table tr:last-child td{border-bottom:none}
+
+/* ── Alpha Panel ── */
+.alpha-bar-wrap{display:inline-block;width:80px;height:8px;background:#2d3748;border-radius:4px;vertical-align:middle;position:relative;overflow:hidden}
+.alpha-bar-pos{position:absolute;left:50%;top:0;height:8px;background:#2b6cb0;border-radius:0 4px 4px 0}
+.alpha-bar-neg{position:absolute;right:50%;top:0;height:8px;background:#c53030;border-radius:4px 0 0 4px}
+
+/* ── 流動性警示卡 ── */
+.liq-indicator{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1a202c}
+.liq-indicator:last-child{border-bottom:none}
+.liq-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.liq-dot.ok{background:#68d391}
+.liq-dot.warn{background:#f6ad55;box-shadow:0 0 6px #f6ad55}
+.liq-dot.bad{background:#fc8181;box-shadow:0 0 6px #fc8181;animation:pulse 1.5s infinite}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:24px;right:24px;background:#1a1d2e;border:1px solid #2d3748;padding:12px 20px;border-radius:10px;font-size:13px;z-index:999;transform:translateY(80px);transition:transform .3s}
+.toast.show{transform:translateY(0)}
+
+/* ── 雜項 ── */
+#last-updated{font-size:11px;color:#4a5568;margin-left:8px}
+.section-sep{height:1px;background:#2d3748;margin:12px 0}
+.chip-alert{display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;background:#322659;color:#d6bcfa;margin-left:4px}
 </style>
 </head>
 <body>
 
 <!-- ===== Header ===== -->
 <div class="header">
-  <h1>&#9889; Omni-Investment Hub</h1>
+  <h1>&#9889; Omni-Investment Hub <span style="font-size:10px;color:#4a5568;font-weight:400">v3</span></h1>
   <div class="nav">
     <button class="active" onclick="showPage('overview')">總覽</button>
     <button onclick="showPage('positions')">持倉管理</button>
     <button onclick="showPage('selection')">選股分析</button>
+    <button onclick="showPage('attribution')">歸因分析</button>
     <button onclick="showPage('tools')">工具</button>
     <button onclick="showPage('settings')">設定</button>
   </div>
-  <!-- 右側：時鐘 + 手動重新整理按鈕（已取消自動更新） -->
   <div style="display:flex;align-items:center;gap:10px">
     <span id="clock" style="font-size:12px;color:#718096"></span>
     <span id="last-updated"></span>
@@ -84,19 +143,26 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 <div id="page-overview" class="page active">
   <div class="grid">
 
-    <div class="card">
+    <div class="card" id="card-regime">
       <div class="card-title">宏觀環境（Macro Regime）</div>
       <div id="regime-content"><p style="color:#718096">載入中...</p></div>
     </div>
 
+    <!-- [v3 NEW] 台指期基差卡 -->
+    <div class="card" id="card-basis">
+      <div class="card-title">台指期基差（Basis Filter）</div>
+      <div id="basis-content"><p style="color:#718096">載入中...</p></div>
+    </div>
+
     <div class="card">
-      <!--
-        組合健康（Portfolio Health）：
-        由模組④ 部位控管每日自動計算，為唯讀快照。
-        可透過增減持倉間接影響曝險比例與 VaR。
-      -->
       <div class="card-title">組合健康（Portfolio Health）</div>
       <div id="health-content"></div>
+    </div>
+
+    <!-- [v3 NEW] 流動性警示卡 -->
+    <div class="card" id="card-liquidity">
+      <div class="card-title">流動性警示（Liquidity Monitor）</div>
+      <div id="liquidity-content"><p style="color:#718096">載入中...</p></div>
     </div>
 
     <div class="card wide">
@@ -113,14 +179,6 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
     </div>
 
     <div class="card">
-      <!--
-        訊號來源（signal_source）常見值：
-          SYSTEM   → 系統自動
-          VCP      → VCP突破訊號
-          ADDON    → 加碼訊號
-          MANUAL   → 人工覆蓋
-        訊號類型（decision_type）見下方工具頁說明
-      -->
       <div class="card-title">訊號日誌（Signal Log，最新5筆）</div>
       <div id="sig-preview"></div>
     </div>
@@ -136,8 +194,6 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
         目前持倉（Open Positions）
         <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button>
       </div>
-
-      <!-- 新增持倉表單 -->
       <div id="add-pos-form" style="display:none;background:#2d3748;padding:16px;border-radius:8px;margin-bottom:16px">
         <div class="form-row">
           <div><div class="form-label">股票代號（Ticker）</div><input id="ap-ticker" placeholder="例：2330"></div>
@@ -151,12 +207,17 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
           <div><div class="form-label">ATR 倍數（Multiplier）</div><input id="ap-mult" type="number" value="3.0" step="0.5"></div>
           <div style="display:flex;align-items:flex-end;gap:8px">
             <button class="btn green" onclick="addPosition()">確認新增</button>
-            <button class="btn" onclick="toggleAddForm()">取消</button>
+            <button class="btn gray" onclick="toggleAddForm()">取消</button>
           </div>
         </div>
       </div>
-
       <div id="positions-full"></div>
+    </div>
+
+    <!-- [v3 NEW] 已平倉 Alpha 分析 -->
+    <div class="card wide">
+      <div class="card-title">近30日平倉 — 個股超額 Alpha（R − 同產業均R）</div>
+      <div id="closed-alpha-content"><p style="color:#718096;font-size:12px">無近期平倉記錄</p></div>
     </div>
   </div>
 </div>
@@ -164,16 +225,17 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 <!-- ===== 選股分析頁 ===== -->
 <div id="page-selection" class="page">
   <div class="grid">
-
     <div class="card wide">
       <div class="card-title">
         選股引擎結果（Selection Engine）
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;color:#718096">最低門檻分數</span>
-          <input type="number" id="score-threshold" value="60" min="0" max="100" style="width:60px;padding:4px 8px">
+          <span style="font-size:12px;color:#718096">最低門檻</span>
+          <input type="number" id="score-threshold" value="60" min="0" max="100" style="width:64px;padding:4px 8px">
           <button class="btn sm" onclick="renderSelection()">套用</button>
         </div>
       </div>
+      <!-- [v3] 基差過濾狀態提示 -->
+      <div id="basis-warning" style="display:none;background:#3d2109;border:1px solid #744210;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#f6ad55"></div>
       <div id="selection-content"></div>
     </div>
 
@@ -186,6 +248,66 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
       <div id="watchlist-content"></div>
     </div>
 
+    <!-- [v3 NEW] 產業群聚 Beta 倍率說明 -->
+    <div class="card">
+      <div class="card-title">產業群聚加分（Sector Cluster Beta）</div>
+      <div id="sector-cluster-content">
+        <table>
+          <thead><tr><th>族群</th><th>觸發檔數</th><th>加分（分）</th><th>Beta 倍率</th><th>最終加分</th></tr></thead>
+          <tbody id="sector-cluster-tbody"><tr><td colspan="5" style="color:#718096;text-align:center">無資料</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 歸因分析頁（v3 NEW）===== -->
+<div id="page-attribution" class="page">
+  <div class="grid">
+
+    <!-- Alpha 拆解摘要 -->
+    <div class="card wide">
+      <div class="card-title">
+        Alpha / Beta / SECTOR_BETA 分布
+        <div style="display:flex;gap:8px">
+          <select id="attr-days" style="width:100px;padding:4px 8px;font-size:12px">
+            <option value="30">近 30 日</option>
+            <option value="60">近 60 日</option>
+            <option value="90">近 90 日</option>
+          </select>
+          <button class="btn sm" onclick="loadAttribution()">重新載入</button>
+        </div>
+      </div>
+      <div id="alpha-source-content"><p style="color:#718096">載入中...</p></div>
+    </div>
+
+    <!-- 產業超額 Alpha 排行 -->
+    <div class="card">
+      <div class="card-title">產業超額 Alpha 排行</div>
+      <div id="sector-alpha-content"><p style="color:#718096;font-size:12px">無資料</p></div>
+    </div>
+
+    <!-- 環境回饋門檻 -->
+    <div class="card">
+      <div class="card-title">
+        環境回饋進場門檻（Regime EV Feedback）
+        <button class="btn sm red" onclick="resetAllThresholds()">全部重置</button>
+      </div>
+      <div id="regime-feedback-content"><p style="color:#718096;font-size:12px">無覆蓋記錄</p></div>
+    </div>
+
+    <!-- 個股超額 Alpha 明細 -->
+    <div class="card wide">
+      <div class="card-title">個股超額 Alpha 明細（individual_alpha = 個股R − 同產業均R）</div>
+      <div id="per-trade-alpha-content"><p style="color:#718096;font-size:12px">無資料</p></div>
+    </div>
+
+    <!-- 計畫外交易統計 -->
+    <div class="card wide">
+      <div class="card-title">計畫外交易統計（Unplanned Trade Penalty）</div>
+      <div id="unplanned-content"><p style="color:#718096;font-size:12px">無資料</p></div>
+    </div>
+
   </div>
 </div>
 
@@ -193,63 +315,48 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 <div id="page-tools" class="page">
   <div class="grid">
 
-    <!-- 每日排程（Scheduler）環境說明 -->
     <div class="card">
       <div class="card-title">每日排程（Daily Scheduler）</div>
       <p style="font-size:12px;color:#718096;margin-bottom:12px">
-        手動觸發收盤後流程：宏觀濾網 → 籌碼監控 → 選股引擎 → 訊號派送
+        手動觸發：宏觀濾網 → 籌碼監控 → 選股引擎（含基差過濾）→ 出場引擎（Regime ATR）→ 歸因分析
       </p>
-      <!--
-        排程執行環境（Scheduler Environment）：
-          ① MacroFilter   → 計算 MRS、判斷 REGIME（BULL_TREND / WEAK_BULL / CHOPPY / BEAR_TREND）
-          ② ChipMonitor   → 計算 CRS 籌碼評分
-          ③ SelectionEngine → 產生 ENTRY_SIGNAL（進場訊號）
-          ④ SignalBus     → 訊號匯流排，派送至 decision_log 與 Redis
-      -->
-      <button class="btn amber" style="width:100%" onclick="runScheduler()">&#9654; 執行宏觀濾網</button>
+      <button class="btn amber" style="width:100%" onclick="runScheduler()">&#9654; 執行每日排程</button>
       <div id="scheduler-result"></div>
     </div>
 
-    <!-- Walk-Forward 驗證 -->
     <div class="card">
-      <!--
-        Walk-Forward 驗證建議（recommendation）：
-          DEPLOY（部署）  → 結果通過，可更新正式因子權重
-          ADJUST（調整）  → 績效不足，建議修改參數
-          REJECT（拒絕）  → 過擬合嚴重，不可上線
-        每季執行一次，結果寫入 wf_results 資料表
-      -->
       <div class="card-title">Walk-Forward 驗證（每季）</div>
       <p style="font-size:12px;color:#718096;margin-bottom:12px">
-        驗證因子穩定性，輸出建議：
-        <span class="good">DEPLOY（部署）</span> /
-        <span class="warn">ADJUST（調整）</span> /
-        <span class="bad">REJECT（拒絕）</span>
+        驗證因子穩定性：
+        <span class="good">DEPLOY</span> / <span style="color:#f6ad55">ADJUST</span> / <span class="bad">REJECT</span>
       </p>
       <button class="btn" style="width:100%" onclick="runWF()">&#9654; 執行 Walk-Forward 驗證</button>
       <div id="wf-result"></div>
     </div>
 
-    <!-- 期望值模擬 -->
     <div class="card">
       <div class="card-title">期望值模擬（EV Simulator）</div>
       <div class="form-row">
-        <div><div class="form-label">股票代號（Ticker）</div><input id="ev-ticker" placeholder="2330"></div>
+        <div><div class="form-label">股票代號</div><input id="ev-ticker" placeholder="2330"></div>
         <div><div class="form-label">總分（Score）</div><input id="ev-score" type="number" value="65"></div>
       </div>
       <button class="btn" style="width:100%" onclick="runEV()">模擬期望值（EV）</button>
       <div id="ev-result"></div>
     </div>
 
-    <!-- 黑天鵝情境 -->
+    <!-- [v3 MODIFIED] 黑天鵝 — 顯示實際減倉結果 -->
     <div class="card">
-      <div class="card-title">黑天鵝情境（Black Swan）</div>
-      <p style="font-size:12px;color:#718096;margin-bottom:12px">檢查組合對極端市場情境的抵抗力</p>
+      <div class="card-title">黑天鵝壓力測試（Black Swan + Liquidity）</div>
+      <p style="font-size:12px;color:#718096;margin-bottom:8px">
+        v3：觸發後自動執行緊急減倉，結果顯示於下方
+      </p>
+      <p style="font-size:11px;color:#4a5568;margin-bottom:12px">
+        情境：閃崩 / 利率衝擊 / 地緣政治 / 流動性危機 / <span style="color:#d6bcfa">基差背離</span> / <span style="color:#d6bcfa">量能枯竭</span>
+      </p>
       <button class="btn red" style="width:100%" onclick="runBlackSwan()">&#9889; 觸發情境壓力測試</button>
       <div id="bs-result"></div>
     </div>
 
-    <!-- 新增財經事件 -->
     <div class="card">
       <div class="card-title">新增財經事件（Calendar Event）</div>
       <div class="form-row">
@@ -259,44 +366,27 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
           <select id="event-type">
             <option value="FED">FED（聯準會）</option>
             <option value="CPI">CPI（消費者物價）</option>
-            <option value="GDP">GDP（國內生產毛額）</option>
-            <option value="PMI">PMI（採購經理人指數）</option>
+            <option value="GDP">GDP</option>
+            <option value="PMI">PMI</option>
             <option value="EARNINGS">EARNINGS（財報）</option>
-            <option value="GEOPOLITICAL">GEOPOLITICAL（地緣政治）</option>
-            <option value="OTHER">OTHER（其他）</option>
+            <option value="GEOPOLITICAL">GEOPOLITICAL（地緣）</option>
+            <option value="OTHER">OTHER</option>
           </select>
         </div>
       </div>
       <div style="margin-bottom:10px">
-        <div class="form-label">事件名稱（Name）</div>
+        <div class="form-label">事件名稱</div>
         <input id="event-name" placeholder="例：Fed 利率決議">
       </div>
       <div class="form-row">
-        <div><div class="form-label">影響等級（Impact，1-5）</div><input id="event-impact" type="number" value="3" min="1" max="5"></div>
+        <div><div class="form-label">影響等級（1–5）</div><input id="event-impact" type="number" value="3" min="1" max="5"></div>
         <div style="display:flex;align-items:flex-end">
           <button class="btn green" style="width:100%" onclick="addEvent()">新增事件</button>
         </div>
       </div>
     </div>
 
-    <!-- 歷史訊號記錄 -->
     <div class="card wide">
-      <!--
-        訊號類型（decision_type）完整說明：
-          ENTRY_SIGNAL      進場訊號（選股引擎選中）
-          ENTRY_EXECUTED    進場執行（實際下單）
-          STATE_CHANGE      持倉狀態切換（S1→S2→…）
-          EXIT_SIGNAL       出場訊號觸發
-          EXIT_EXECUTED     出場執行（實際賣出）
-          ADDON_SIGNAL      加碼訊號
-          ADDON_EXECUTED    加碼執行
-          STOP_ADJUSTMENT   停損線調整
-          REGIME_CHANGE     宏觀環境切換
-          EVENT_RULE        事件日曆規則觸發
-          CIRCUIT_BREAKER   熔斷觸發
-          MANUAL_OVERRIDE   人工覆蓋
-          SCENARIO_TRIGGER  黑天鵝情境觸發
-      -->
       <div class="card-title">歷史訊號記錄（Signal History / decision_log）</div>
       <div id="signals-full"></div>
     </div>
@@ -312,26 +402,47 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
       <div class="card-title">執行模式（Execution Mode）</div>
       <p style="font-size:13px;color:#718096;margin-bottom:16px">控制系統是否實際下單</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <!-- PAPER: 模擬交易，不實際下單 -->
         <button class="mode-btn active" id="mode-PAPER" onclick="setMode('PAPER')">Paper（模擬）</button>
-        <!-- ALERT_ONLY: 僅發 Telegram 通知，不下單 -->
-        <button class="mode-btn" id="mode-ALERT_ONLY" onclick="setMode('ALERT_ONLY')">Alert Only（僅通知）</button>
-        <!-- SEMI_AUTO: 大單需人工確認，小單自動 -->
-        <button class="mode-btn" id="mode-SEMI_AUTO" onclick="setMode('SEMI_AUTO')">Semi Auto（半自動）</button>
-        <!-- FULL_AUTO: 全自動下單 -->
-        <button class="mode-btn" id="mode-FULL_AUTO" onclick="setMode('FULL_AUTO')">Full Auto（全自動）</button>
+        <button class="mode-btn" id="mode-ALERT_ONLY" onclick="setMode('ALERT_ONLY')">Alert Only</button>
+        <button class="mode-btn" id="mode-SEMI_AUTO" onclick="setMode('SEMI_AUTO')">Semi Auto</button>
+        <button class="mode-btn" id="mode-FULL_AUTO" onclick="setMode('FULL_AUTO')">Full Auto</button>
       </div>
       <div id="mode-desc" style="margin-top:12px;font-size:12px;color:#718096"></div>
     </div>
 
+    <!-- [v3 MODIFIED] ATR 倍數 → Regime 動態對照表 -->
     <div class="card">
-      <div class="card-title">模組參數調整（Module Parameters）</div>
-      <div class="slider-row">
-        <label>ATR 倍數（止損距離）</label>
-        <input type="range" min="1.5" max="5" step="0.5" value="3.0" id="atr-mult"
-          oninput="document.getElementById('atr-mult-val').textContent=this.value">
-        <span id="atr-mult-val">3.0</span>
-      </div>
+      <div class="card-title">Regime 動態 ATR 停損倍數</div>
+      <p style="font-size:12px;color:#718096;margin-bottom:10px">各市場環境使用不同 S1 停損距離（v3）</p>
+      <table class="atr-table">
+        <thead>
+          <tr><th>Regime</th><th>S1 ATR 倍數</th><th>保本觸發（R）</th><th>說明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="badge BULL_TREND" style="font-size:10px">BULL</span></td>
+            <td><input type="number" id="atr-bull" value="3.0" step="0.5" min="1" max="5" style="width:70px"></td>
+            <td><span style="color:#718096">不強制</span></td>
+            <td style="color:#718096;font-size:11px">給洗盤空間</td>
+          </tr>
+          <tr>
+            <td><span class="badge CHOPPY" style="font-size:10px">CHOPPY</span></td>
+            <td><input type="number" id="atr-choppy" value="2.0" step="0.5" min="1" max="5" style="width:70px"></td>
+            <td style="color:#f6ad55;font-size:12px">0.5R</td>
+            <td style="color:#718096;font-size:11px">迅速保本</td>
+          </tr>
+          <tr>
+            <td><span class="badge BEAR_TREND" style="font-size:10px">BEAR</span></td>
+            <td><input type="number" id="atr-bear" value="1.5" step="0.5" min="1" max="5" style="width:70px"></td>
+            <td style="color:#fc8181;font-size:12px">0.3R</td>
+            <td style="color:#718096;font-size:11px">極度縮緊</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">選股門檻與 EV 參數</div>
       <div class="slider-row">
         <label>Trailing Stop %（移動止損）</label>
         <input type="range" min="5" max="30" step="1" value="15" id="trail-pct"
@@ -353,414 +464,826 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
       <button class="btn" style="width:100%;margin-top:12px" onclick="saveSettings()">儲存設定</button>
     </div>
 
+    <!-- [v3 NEW] 環境回饋門檻覆蓋查看 -->
+    <div class="card">
+      <div class="card-title">
+        環境回饋門檻覆蓋（Regime EV Feedback）
+        <button class="btn sm red" onclick="resetAllThresholds()">全部重置</button>
+      </div>
+      <p style="font-size:12px;color:#718096;margin-bottom:10px">
+        Attribution v3 自動調整各 Regime 進場門檻，如需手動恢復預設值請使用重置。
+      </p>
+      <div id="settings-regime-threshold"></div>
+    </div>
+
   </div>
 </div>
 
-<!-- Toast 通知 -->
+<!-- Toast -->
 <div class="toast" id="toast"></div>
 
 <!-- ===== JavaScript ===== -->
 <script>
 var DATA = {};
-var SETTINGS = { mode: 'PAPER', atr_mult: 3.0, trail_pct: 15, score_threshold: 60, ev_threshold: 0.5 };
-
+var ATTR_DATA = {};
+var SETTINGS = {
+  mode:'PAPER', atr_mult_bull:3.0, atr_mult_choppy:2.0, atr_mult_bear:1.5,
+  trail_pct:15, score_threshold:60, ev_threshold:0.5
+};
 var MODE_DESC = {
-  'PAPER':      '模擬交易（Paper Trading），不實際下單，適合測試與觀察',
-  'ALERT_ONLY': '僅發 Telegram 通知（Alert Only），不下單，適合人工決策',
-  'SEMI_AUTO':  '半自動（Semi-Auto），大單需人工確認，小單自動執行',
-  'FULL_AUTO':  '全自動（Full Auto），全自動下單，請確認風控設定正確'
+  'PAPER':      '模擬交易，不實際下單，適合測試與觀察',
+  'ALERT_ONLY': '僅發 Telegram 通知，不下單，適合人工決策',
+  'SEMI_AUTO':  '半自動，大單需人工確認，小單自動執行',
+  'FULL_AUTO':  '全自動下單，請確認風控設定正確'
 };
 
-// ── 時鐘（每秒更新顯示時間，不呼叫 API）──
-setInterval(function() {
+/* ── 時鐘 ── */
+setInterval(function(){
   document.getElementById('clock').textContent = new Date().toLocaleString('zh-TW');
 }, 1000);
 
-// ── 已取消自動更新（原 setInterval(loadData, 60000) 已移除）──
-// 請按右上角「重新整理」按鈕手動更新資料
-
-// ── 手動重新整理 ──
-function manualRefresh() {
+/* ── 手動重整 ── */
+function manualRefresh(){
   var btn = document.getElementById('refresh-btn');
-  btn.textContent = '載入中...';
-  btn.classList.add('loading');
-  btn.disabled = true;
-  loadData(function() {
-    btn.textContent = '↻ 重新整理';
-    btn.classList.remove('loading');
-    btn.disabled = false;
+  btn.textContent = '載入中...'; btn.disabled = true;
+  loadData(function(){
+    btn.textContent = '↻ 重新整理'; btn.disabled = false;
   });
 }
 
-// ── 頁面切換 ──
-function showPage(name) {
-  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-  document.querySelectorAll('.nav button').forEach(function(b) { b.classList.remove('active'); });
-  document.getElementById('page-' + name).classList.add('active');
-  var pages = ['overview', 'positions', 'selection', 'tools', 'settings'];
-  document.querySelectorAll('.nav button')[pages.indexOf(name)].classList.add('active');
-  if (name === 'selection') renderSelection();
-  if (name === 'tools')     renderSignalsFull();
-  if (name === 'positions') renderPositionsFull();
-  if (name === 'settings')  loadSettings();
+/* ── 頁面切換 ── */
+function showPage(name){
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.nav button').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById('page-'+name).classList.add('active');
+  var pages = ['overview','positions','selection','attribution','tools','settings'];
+  var idx = pages.indexOf(name);
+  if(idx >= 0) document.querySelectorAll('.nav button')[idx].classList.add('active');
+  if(name==='selection')  renderSelection();
+  if(name==='tools')      renderSignalsFull();
+  if(name==='positions')  renderPositionsFull();
+  if(name==='settings')   loadSettings();
+  if(name==='attribution'){ loadAttribution(); renderRegimeFeedback(); }
 }
 
-// ── Toast 通知 ──
-function toast(msg, isErr) {
+/* ── Toast ── */
+function toast(msg,isErr){
   var t = document.getElementById('toast');
   t.textContent = msg;
   t.style.borderColor = isErr ? '#fc8181' : '#68d391';
   t.classList.add('show');
-  setTimeout(function() { t.classList.remove('show'); }, 3000);
+  setTimeout(function(){ t.classList.remove('show'); }, 3000);
 }
 
-// ── POST 工具 ──
-function post(url, body) {
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  }).then(function(r) { return r.json(); });
+/* ── POST 工具 ── */
+function post(url,body){
+  return fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  }).then(function(r){ return r.json(); });
 }
 
-// ── 載入資料（手動觸發） ──
-function loadData(callback) {
-  fetch('/api/data').then(function(r) { return r.json(); }).then(function(d) {
+/* ── 載入資料 ── */
+function loadData(callback){
+  fetch('/api/data').then(function(r){ return r.json(); }).then(function(d){
     DATA = d;
-    // 記錄最後更新時間
     document.getElementById('last-updated').textContent =
       '最後更新：' + new Date().toLocaleTimeString('zh-TW');
     renderOverview();
-    if (document.getElementById('page-positions').classList.contains('active')) {
-      renderPositionsFull();
-    }
-    if (callback) callback();
-  }).catch(function(e) {
-    toast('資料載入失敗：' + e.message, true);
-    if (callback) callback();
+    if(document.getElementById('page-positions').classList.contains('active')) renderPositionsFull();
+    if(callback) callback();
+  }).catch(function(e){
+    toast('資料載入失敗：'+e.message, true);
+    if(callback) callback();
   });
 }
 
-// ── 渲染總覽 ──
-function renderOverview() {
+/* ══════════════════════════════════════════════
+   總覽頁渲染
+══════════════════════════════════════════════ */
+function renderOverview(){
   var reg = DATA.regime || {};
   var h   = DATA.health || {};
-  var vixCls = (reg.vix_level || 0) > 25 ? 'bad' : (reg.vix_level || 0) > 18 ? 'warn' : 'good';
-  var expPct = h.gross_exposure_pct ? (h.gross_exposure_pct * 100).toFixed(1) : '0.0';
-  var expCls = h.gross_exposure_pct > 0.8 ? 'bad' : h.gross_exposure_pct > 0.5 ? 'warn' : 'good';
 
-  // 宏觀環境
+  /* 宏觀環境 */
+  var vixCls = (reg.vix_level||0)>25?'bad':(reg.vix_level||0)>18?'warn':'good';
+  var expPct = h.gross_exposure_pct ? (h.gross_exposure_pct*100).toFixed(1) : '0.0';
+  var expCls = h.gross_exposure_pct>0.8?'bad':h.gross_exposure_pct>0.5?'warn':'good';
   document.getElementById('regime-content').innerHTML =
-    '<div style="margin-bottom:12px"><span class="badge ' + (reg.regime || '') + '">' + (reg.regime || 'N/A') + '</span></div>' +
-    '<div class="metric"><span class="label">MRS 分數</span><span class="val neu">' + (reg.mrs_score || '-') + '</span></div>' +
-    '<div class="metric"><span class="label">VIX（波動率指數）</span><span class="val ' + vixCls + '">' + (reg.vix_level || '-') + '</span></div>' +
-    '<div class="metric"><span class="label">曝險上限（Max Exposure）</span><span class="val neu">' + (reg.max_exposure_limit ? (reg.max_exposure_limit * 100).toFixed(0) + '%' : 'N/A') + '</span></div>';
+    '<div style="margin-bottom:12px"><span class="badge '+(reg.regime||'')+'">'+(reg.regime||'N/A')+'</span></div>'+
+    '<div class="metric"><span class="label">MRS 分數</span><span class="val neu">'+(reg.mrs_score||'-')+'</span></div>'+
+    '<div class="metric"><span class="label">VIX</span><span class="val '+vixCls+'">'+(reg.vix_level||'-')+'</span></div>'+
+    '<div class="metric"><span class="label">曝險上限</span><span class="val neu">'+(reg.max_exposure_limit?(reg.max_exposure_limit*100).toFixed(0)+'%':'N/A')+'</span></div>';
 
-  // 組合健康
+  /* [v3] 台指期基差卡 */
+  renderBasisCard(reg);
+
+  /* 組合健康 */
   document.getElementById('health-content').innerHTML =
-    '<div class="metric"><span class="label">NAV（組合淨值）</span><span class="val neu">' + Number(h.nav || 0).toLocaleString() + ' 元</span></div>' +
-    '<div class="metric"><span class="label">曝險比例（Gross Exposure）</span><span class="val ' + expCls + '">' + expPct + '%</span></div>' +
-    '<div class="metric"><span class="label">VaR 95%（日最大損失）</span><span class="val warn">' + (h.portfolio_var_95 ? (h.portfolio_var_95 * 100).toFixed(2) + '%' : 'N/A') + '</span></div>' +
-    '<div class="metric"><span class="label">熔斷狀態（Circuit Breaker）</span><span class="val ' + (h.circuit_breaker_triggered ? 'bad' : 'good') + '">' + (h.circuit_breaker_triggered ? '⚠ 觸發' : '✓ 正常') + '</span></div>';
+    '<div class="metric"><span class="label">NAV（組合淨值）</span><span class="val neu">'+Number(h.nav||0).toLocaleString()+' 元</span></div>'+
+    '<div class="metric"><span class="label">曝險比例</span><span class="val '+expCls+'">'+expPct+'%</span></div>'+
+    '<div class="metric"><span class="label">VaR 95%</span><span class="val warn">'+(h.portfolio_var_95?(h.portfolio_var_95*100).toFixed(2)+'%':'N/A')+'</span></div>'+
+    '<div class="metric"><span class="label">熔斷狀態</span><span class="val '+(h.circuit_breaker_triggered?'bad':'good')+'">'+(h.circuit_breaker_triggered?'⚠ 觸發':'✓ 正常')+'</span></div>'+
+    '<div class="metric"><span class="label">最大回撤</span><span class="val warn">'+(h.drawdown_from_peak?(h.drawdown_from_peak*100).toFixed(1)+'%':'0.0%')+'</span></div>';
 
-  // 持倉快照（前5筆）
-  var posRows = (DATA.positions || []).slice(0, 5).map(function(p) {
-    var r = p.r_multiple_current || 0;
-    return '<tr><td>' + String(p.ticker || '').trim() + '</td>' +
-      '<td><span class="tag">' + stateLabel(p.state) + '</span></td>' +
-      '<td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(r).toFixed(2) + 'R</td>' +
-      '<td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(p.unrealized_pnl || 0).toLocaleString() + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無持倉</td></tr>';
+  /* [v3] 流動性警示卡 */
+  renderLiquidityCard();
+
+  /* 持倉快照 */
+  var posRows = (DATA.positions||[]).slice(0,5).map(function(p){
+    var r = p.r_multiple_current||0;
+    return '<tr>'+
+      '<td>'+String(p.ticker||'').trim()+'</td>'+
+      '<td><span class="tag">'+stateLabel(p.state)+'</span></td>'+
+      '<td>'+(p.entry_price||'-')+'</td>'+
+      '<td>'+(p.current_stop_price||'-')+'</td>'+
+      '<td class="'+(r>=0?'good':'bad')+'" style="font-weight:600">'+Number(r).toFixed(2)+'R</td>'+
+      '<td class="'+(( p.unrealized_pnl||0)>=0?'good':'bad')+'">'+Number(p.unrealized_pnl||0).toLocaleString()+'</td>'+
+      '</tr>';
+  }).join('')||'<tr><td colspan="6" style="color:#718096;text-align:center">無持倉</td></tr>';
   document.getElementById('pos-preview').innerHTML =
-    '<table><tr><th>股票</th><th>狀態</th><th>R 值</th><th>未實現損益</th></tr>' + posRows + '</table>';
+    '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損</th><th>R倍數</th><th>損益</th></tr>'+posRows+'</table>';
 
-  // 籌碼監控
-  var chipRows = (DATA.chips || []).map(function(c) {
-    var sc = c.crs_total || 0;
-    return '<tr><td>' + String(c.ticker || '').trim() + '</td>' +
-      '<td class="' + (sc >= 60 ? 'good' : sc >= 40 ? 'neu' : 'bad') + '">' + Number(sc).toFixed(1) + '</td>' +
-      '<td>' + (c.three_way_resonance ? '<span class="good">✓ 三向共振</span>' : '-') + '</td></tr>';
-  }).join('') || '<tr><td colspan="3" style="color:#718096;text-align:center">無資料</td></tr>';
+  /* 籌碼監控 */
+  var chipRows = (DATA.chips||[]).map(function(c){
+    var sc = c.crs_total||0;
+    return '<tr>'+
+      '<td>'+String(c.ticker||'').trim()+'</td>'+
+      '<td class="'+(sc>=60?'good':sc>=40?'neu':'bad')+'">'+Number(sc).toFixed(1)+'</td>'+
+      '<td>'+(c.three_way_resonance?'<span class="good">✓ 三向</span>':'-')+'</td>'+
+      '</tr>';
+  }).join('')||'<tr><td colspan="3" style="color:#718096;text-align:center">無資料</td></tr>';
   document.getElementById('chip-content').innerHTML =
-    '<table><tr><th>股票</th><th>CRS 分</th><th>三向共振</th></tr>' + chipRows + '</table>';
+    '<table><tr><th>股票</th><th>CRS 分</th><th>共振</th></tr>'+chipRows+'</table>';
 
-  // 訊號日誌（前5筆）
-  var sigRows = (DATA.signals || []).slice(0, 5).map(function(s) {
-    var t = s.logged_at ? new Date(s.logged_at).toLocaleString('zh-TW') : '-';
-    return '<tr>' +
-      '<td style="font-size:11px;color:#718096">' + t + '</td>' +
-      '<td>' + decisionTypeLabel(s.decision_type) + '</td>' +
-      '<td>' + String(s.ticker || '').trim() + '</td>' +
-      '<td>' + signalSourceLabel(s.signal_source) + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
+  /* 訊號日誌 */
+  var sigRows = (DATA.signals||[]).slice(0,5).map(function(s){
+    var t = s.logged_at?new Date(s.logged_at).toLocaleString('zh-TW'):'-';
+    return '<tr>'+
+      '<td style="font-size:11px;color:#718096">'+t+'</td>'+
+      '<td>'+decisionTypeLabel(s.decision_type)+'</td>'+
+      '<td>'+String(s.ticker||'').trim()+'</td>'+
+      '<td>'+signalSourceLabel(s.signal_source)+'</td>'+
+      '</tr>';
+  }).join('')||'<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
   document.getElementById('sig-preview').innerHTML =
-    '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>' + sigRows + '</table>';
+    '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>'+sigRows+'</table>';
 }
 
-// ── 持倉狀態中文標籤 ──
-function stateLabel(state) {
-  var map = {
-    'S1_INITIAL_DEFENSE':  'S1 初始防守',
-    'S2_BREAKOUT_CONFIRM': 'S2 突破確認',
-    'S3_PROFIT_PROTECT':   'S3 獲利保護',
-    'S4_TRAILING_STOP':    'S4 移動止損',
-    'S5_ACTIVE_EXIT':      'S5 主動出場',
-    'STOPPED_OUT':         '止損出場',
-    'CLOSED':              '已平倉'
-  };
-  return map[state] || state || '-';
+/* ── [v3] 台指期基差卡 ── */
+function renderBasisCard(reg){
+  var tx   = reg.tx_futures_price;
+  var tsec = reg.tsec_index_price;
+  var divs = reg.dividend_adjustment || 0;
+  var card = document.getElementById('card-basis');
+
+  if(!tx || !tsec || parseFloat(tsec)<=0){
+    document.getElementById('basis-content').innerHTML =
+      '<p style="color:#718096;font-size:12px">無期貨資料（收盤後 / API 未配置）</p>'+
+      '<div class="metric"><span class="label">過濾狀態</span><span class="basis-ok">不過濾（資料缺失）</span></div>';
+    card.className = 'card';
+    return;
+  }
+
+  var basis     = (parseFloat(tx) - (parseFloat(tsec) - parseFloat(divs))) / parseFloat(tsec);
+  var basisPct  = (basis*100).toFixed(2);
+  var basisCls, basisLabel, filterStatus;
+
+  if(basis < -0.015){
+    basisCls     = 'basis-hard';
+    basisLabel   = '⛔ HARD BLOCK（< -1.5%）';
+    filterStatus = '所有進場訊號分數強制歸零';
+    card.className = 'card danger-border';
+  } else if(basis < -0.008){
+    basisCls     = 'basis-soft';
+    basisLabel   = '⚠ SOFT PENALTY（< -0.8%）';
+    filterStatus = '個股分數 × 0.80 懲罰';
+    card.className = 'card warn-border';
+  } else {
+    basisCls     = 'basis-ok';
+    basisLabel   = '✓ 正常（≥ -0.8%）';
+    filterStatus = '不過濾';
+    card.className = 'card';
+  }
+
+  document.getElementById('basis-content').innerHTML =
+    '<div style="margin-bottom:10px"><span class="'+basisCls+'">'+basisLabel+'</span></div>'+
+    '<div class="metric"><span class="label">Normalized Basis</span><span class="val '+(basis<-0.015?'bad':basis<-0.008?'warn':'good')+'">'+basisPct+'%</span></div>'+
+    '<div class="metric"><span class="label">台指期（TX）</span><span class="val neu">'+Number(tx).toLocaleString()+'</span></div>'+
+    '<div class="metric"><span class="label">加權指數（TSEC）</span><span class="val neu">'+Number(tsec).toLocaleString()+'</span></div>'+
+    '<div class="metric"><span class="label">進場過濾效果</span><span class="val '+(basis<-0.008?'warn':'good')+'">'+filterStatus+'</span></div>';
 }
 
-// ── 訊號來源中文標籤 ──
-function signalSourceLabel(source) {
-  var map = {
-    'SELECTION_ENGINE': '選股引擎',
-    'MACRO_FILTER':     '宏觀濾網',
-    'CHIP_MONITOR':     '籌碼監控',
-    'WALK_FORWARD':     'WF 驗證',
-    'POSITION_MANAGER': '部位控管',
-    'EXIT_ENGINE':      '出場引擎',
-    'EVENT_CALENDAR':   '事件日曆',
-    'CIRCUIT_BREAKER':  '熔斷機制',
-    'BLACK_SWAN':       '黑天鵝',
-    'REBALANCER':       '再平衡',
-    'SYSTEM':           '系統自動',
-    'MANUAL':           '人工操作',
-    'VCP':              'VCP突破',
-    'ADDON':            '加碼',
-  };
-  return map[source] || source || '-';
+/* ── [v3] 流動性警示卡 ── */
+function renderLiquidityCard(){
+  var liqSigs  = DATA.liquidity_signals || [];
+  var attr     = DATA.attribution || {};
+  var regFb    = attr.regime_ev_feedback || {};
+
+  /* 模擬流動性狀態（實際值來自後端） */
+  var basisPanic  = false;
+  var volumeWarn  = false;
+  var recentTrig  = liqSigs.length > 0;
+
+  /* 從最近黑天鵝訊號判斷 */
+  liqSigs.forEach(function(s){
+    if(s.notes && s.notes.indexOf('基差背離')>=0) basisPanic = true;
+    if(s.notes && s.notes.indexOf('成交量')>=0)   volumeWarn = true;
+  });
+
+  var html = '';
+
+  /* 基差持續計時 */
+  html += '<div class="liq-indicator">'+
+    '<div class="liq-dot '+(basisPanic?'bad':'ok')+'"></div>'+
+    '<div style="flex:1">'+
+      '<div style="font-size:12px;font-weight:600;color:'+(basisPanic?'#fc8181':'#68d391')+'">'+
+        (basisPanic?'⚠ 基差背離持續中':'✓ 基差正常')+'</div>'+
+      '<div style="font-size:11px;color:#718096">台指期逆價差 > -1.2% 持續計時</div>'+
+    '</div>'+
+  '</div>';
+
+  /* 成交量衰退 */
+  html += '<div class="liq-indicator">'+
+    '<div class="liq-dot '+(volumeWarn?'warn':'ok')+'"></div>'+
+    '<div style="flex:1">'+
+      '<div style="font-size:12px;font-weight:600;color:'+(volumeWarn?'#f6ad55':'#68d391')+'">'+
+        (volumeWarn?'⚠ 量能萎縮偵測中':'✓ 成交量正常')+'</div>'+
+      '<div style="font-size:11px;color:#718096">5日均量 / 20日均量監控</div>'+
+    '</div>'+
+  '</div>';
+
+  /* 最近觸發記錄 */
+  if(recentTrig){
+    html += '<div class="section-sep"></div>'+
+      '<div style="font-size:11px;color:#718096;margin-bottom:6px">近7日觸發記錄（'+liqSigs.length+'筆）</div>';
+    liqSigs.slice(0,3).forEach(function(s){
+      var t = s.logged_at ? new Date(s.logged_at).toLocaleString('zh-TW') : '-';
+      html += '<div style="font-size:11px;color:#fc8181;padding:2px 0">'+t+' — '+(s.notes||'黑天鵝觸發')+'</div>';
+    });
+  } else {
+    html += '<div class="section-sep"></div>'+
+      '<div style="font-size:11px;color:#4a5568">近7日無黑天鵝觸發</div>';
+  }
+
+  document.getElementById('liquidity-content').innerHTML = html;
 }
 
-// ── 訊號類型中文標籤 ──
-function decisionTypeLabel(type) {
-  var map = {
-    'ENTRY_SIGNAL':      '進場訊號',
-    'ENTRY_EXECUTED':    '進場執行',
-    'STATE_CHANGE':      '狀態切換',
-    'EXIT_SIGNAL':       '出場訊號',
-    'EXIT_EXECUTED':     '出場執行',
-    'ADDON_SIGNAL':      '加碼訊號',
-    'ADDON_EXECUTED':    '加碼執行',
-    'STOP_ADJUSTMENT':   '停損調整',
-    'REGIME_CHANGE':     '環境切換',
-    'EVENT_RULE':        '事件規則',
-    'CIRCUIT_BREAKER':   '熔斷觸發',
-    'MANUAL_OVERRIDE':   '人工覆蓋',
-    'SCENARIO_TRIGGER':  '情境觸發'
-  };
-  return map[type] || type || '-';
-}
-
-// ── 渲染持倉完整列表 ──
-function renderPositionsFull() {
-  var rows = (DATA.positions || []).map(function(p) {
-    var r = p.r_multiple_current || 0;
-    return '<tr>' +
-      '<td>' + String(p.ticker || '').trim() + '</td>' +
-      '<td><span class="tag">' + stateLabel(p.state) + '</span></td>' +
-      '<td>' + (p.entry_price || '-') + '</td>' +
-      '<td>' + (p.current_stop_price || '-') + '</td>' +
-      '<td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(r).toFixed(2) + 'R</td>' +
-      '<td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(p.unrealized_pnl || 0).toLocaleString() + '</td>' +
-      '<td><button class="btn sm red" onclick="closePosition(\'' + p.id + '\',' + (p.entry_price || 0) + ')">平倉</button></td></tr>';
-  }).join('') || '<tr><td colspan="7" style="color:#718096;text-align:center">無持倉</td></tr>';
+/* ══════════════════════════════════════════════
+   持倉管理頁
+══════════════════════════════════════════════ */
+function renderPositionsFull(){
+  var rows = (DATA.positions||[]).map(function(p){
+    var r      = p.r_multiple_current||0;
+    var atrMlt = p.s1_atr_mult_applied ? Number(p.s1_atr_mult_applied).toFixed(1)+'× ATR' : '-';
+    return '<tr>'+
+      '<td>'+String(p.ticker||'').trim()+'</td>'+
+      '<td><span class="tag">'+stateLabel(p.state)+'</span></td>'+
+      '<td>'+(p.entry_price||'-')+'</td>'+
+      '<td>'+(p.current_stop_price||'-')+'</td>'+
+      '<td class="'+(r>=0?'good':'bad')+'" style="font-weight:600">'+Number(r).toFixed(2)+'R</td>'+
+      '<td class="'+((p.unrealized_pnl||0)>=0?'good':'bad')+'">'+Number(p.unrealized_pnl||0).toLocaleString()+'</td>'+
+      /* [v3] 動態 ATR 倍數 */
+      '<td style="color:#90cdf4;font-size:11px">'+atrMlt+'</td>'+
+      '<td>'+
+        '<button class="btn sm red" style="margin-right:4px" onclick="closePos(\''+p.id+'\','+p.entry_price+')">平倉</button>'+
+      '</td>'+
+      '</tr>';
+  }).join('')||'<tr><td colspan="8" style="color:#718096;text-align:center">無持倉</td></tr>';
   document.getElementById('positions-full').innerHTML =
-    '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損價</th><th>R 值</th><th>未實現損益</th><th>操作</th></tr>' + rows + '</table>';
+    '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損</th><th>R倍數</th><th>損益</th><th>S1 ATR倍</th><th>操作</th></tr>'+rows+'</table>';
+
+  /* [v3] 已平倉個股 Alpha */
+  renderClosedAlpha();
 }
 
-function toggleAddForm() {
-  var f = document.getElementById('add-pos-form');
-  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+function renderClosedAlpha(){
+  var closed = DATA.closed_positions || [];
+  if(!closed.length){
+    document.getElementById('closed-alpha-content').innerHTML = '<p style="color:#718096;font-size:12px">無近期平倉記錄</p>';
+    return;
+  }
+  var rows = closed.map(function(p){
+    var alpha  = parseFloat(p.individual_alpha || 0);
+    var r      = parseFloat(p.r_multiple_current || 0);
+    var barW   = Math.min(Math.abs(alpha) * 20, 40);
+    var barHtml = alpha >= 0
+      ? '<div class="alpha-bar-wrap"><div class="alpha-bar-pos" style="width:'+barW+'px"></div></div>'
+      : '<div class="alpha-bar-wrap"><div class="alpha-bar-neg" style="width:'+barW+'px"></div></div>';
+    var src = alpha > 0.5 ? 'ALPHA' : r > 0 ? 'BETA' : 'MIXED';
+    var srcHtml = '<span class="src-'+ src.toLowerCase() +'">'+ src +'</span>';
+    return '<tr>'+
+      '<td>'+String(p.ticker||'').trim()+'</td>'+
+      '<td class="'+(r>=0?'good':'bad')+'">'+Number(r).toFixed(2)+'R</td>'+
+      '<td>'+barHtml+'<span style="font-size:11px;color:'+(alpha>=0?'#90cdf4':'#fc8181')+'">'+
+        (alpha>=0?'+':'')+Number(alpha).toFixed(2)+'R</span></td>'+
+      '<td>'+srcHtml+'</td>'+
+      '<td><span class="badge '+(p.regime_at_entry||'')+'" style="font-size:10px">'+(p.regime_at_entry||'-')+'</span></td>'+
+      '<td style="font-size:11px;color:#718096">'+(p.exit_date||'-')+'</td>'+
+      '</tr>';
+  }).join('');
+  document.getElementById('closed-alpha-content').innerHTML =
+    '<table><tr><th>股票</th><th>R倍數</th><th>超額 Alpha</th><th>歸因</th><th>進場環境</th><th>平倉日</th></tr>'+rows+'</table>';
 }
 
-function closePosition(id, price) {
-  if (!confirm('確定平倉？')) return;
-  post('/api/close-position', { position_id: id, price: price }).then(function(r) {
-    if (r.ok) { toast('平倉成功'); loadData(); }
-    else toast('失敗：' + r.error, true);
-  });
-}
+/* ══════════════════════════════════════════════
+   選股分析頁
+══════════════════════════════════════════════ */
+function renderSelection(){
+  var threshold = parseFloat(document.getElementById('score-threshold').value || 60);
 
-function addPosition() {
-  var ticker = document.getElementById('ap-ticker').value;
-  var price  = document.getElementById('ap-price').value;
-  var shares = document.getElementById('ap-shares').value;
-  var atr    = document.getElementById('ap-atr').value;
-  var mult   = document.getElementById('ap-mult').value;
-  if (!ticker || !price || !shares) { toast('請填入股票、價格、股數', true); return; }
-  post('/api/add-position', {
-    ticker: ticker, entry_price: price, shares: shares,
-    atr: atr || 15, atr_multiplier: mult || 3
-  }).then(function(r) {
-    if (r.ok) { toast('持倉新增成功'); loadData(); toggleAddForm(); }
-    else toast('失敗：' + r.error, true);
-  });
-}
+  /* [v3] 基差警告提示 */
+  var reg = DATA.regime || {};
+  var basisWarn = document.getElementById('basis-warning');
+  if(reg.tx_futures_price && reg.tsec_index_price){
+    var basis = (parseFloat(reg.tx_futures_price) - parseFloat(reg.tsec_index_price)) / parseFloat(reg.tsec_index_price);
+    if(basis < -0.015){
+      basisWarn.style.display = 'block';
+      basisWarn.innerHTML = '⛔ <strong>HARD BLOCK 生效中</strong>：台指期逆價差 ' + (basis*100).toFixed(2) + '%，所有進場訊號分數已強制歸零';
+    } else if(basis < -0.008){
+      basisWarn.style.display = 'block';
+      basisWarn.innerHTML = '⚠ <strong>SOFT PENALTY 生效中</strong>：台指期逆價差 ' + (basis*100).toFixed(2) + '%，個股分數已 ×0.80 調整';
+    } else {
+      basisWarn.style.display = 'none';
+    }
+  } else {
+    basisWarn.style.display = 'none';
+  }
 
-// ── 渲染選股結果 ──
-function renderSelection() {
-  var thresh = parseInt(document.getElementById('score-threshold').value) || 60;
-  var rows = (DATA.stocks || []).map(function(s) {
-    var sc = s.total_score || 0;
-    var pass = sc >= thresh;
-    var pct = Math.min(100, sc);
-    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '">' +
-      '<td>' + String(s.ticker || '').trim() + (pass ? ' <span class="tag" style="background:#1c4532;color:#68d391">✓</span>' : '') + '</td>' +
-      '<td><span class="bar-wrap"><span class="bar-fill" style="width:' + pct + '%"></span></span> ' + Number(sc).toFixed(1) + '</td>' +
-      '<td>' + Number(s.score_momentum || 0).toFixed(0) + '</td>' +
-      '<td>' + Number(s.score_chip || 0).toFixed(0) + '</td>' +
-      '<td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
-  }).join('') || '<tr><td colspan="5" style="color:#718096;text-align:center">無資料</td></tr>';
+  /* 選股表格 */
+  var rows = (DATA.stocks||[]).map(function(s){
+    var sc   = s.total_score || 0;
+    var pass = sc >= threshold;
+    var pct  = Math.min(sc, 100);
+    /* [v3] 基差過濾原因 */
+    var basisTag = '';
+    if(s.basis_filter_reason){
+      if(s.basis_filter_reason.indexOf('HARD')>=0)
+        basisTag = '<span class="basis-hard" style="margin-left:4px">⛔</span>';
+      else
+        basisTag = '<span class="basis-soft" style="margin-left:4px">⚠</span>';
+    }
+    /* [v3] 群聚加分含 Beta 倍率 */
+    var bonusStr = '-';
+    if(s.sector_bonus && parseFloat(s.sector_bonus)>0){
+      var mult = s.sector_beta_mult ? Number(s.sector_beta_mult).toFixed(1) : '1.0';
+      bonusStr = '+'+Number(s.sector_bonus).toFixed(1)+'<span style="font-size:10px;color:#d6bcfa">（×'+mult+'）</span>';
+    }
+    return '<tr style="opacity:'+(pass?1:0.4)+'">'+
+      '<td>'+String(s.ticker||'').trim()+(pass?'<span class="tag" style="background:#1c4532;color:#68d391;margin-left:4px">✓</span>':'')+basisTag+'</td>'+
+      '<td><div class="bar-wrap"><div class="bar-fill" style="width:'+pct+'%"></div></div>'+Number(sc).toFixed(1)+'</td>'+
+      '<td>'+Number(s.score_momentum||0).toFixed(0)+'</td>'+
+      '<td>'+Number(s.score_chip||0).toFixed(0)+'</td>'+
+      '<td>'+Number(s.score_fundamental||0).toFixed(0)+'</td>'+
+      '<td style="font-size:11px;color:#a0aec0">'+(s.sector||'-')+'</td>'+
+      '<td>'+bonusStr+'</td>'+
+      '</tr>';
+  }).join('')||'<tr><td colspan="7" style="color:#718096;text-align:center">無資料</td></tr>';
   document.getElementById('selection-content').innerHTML =
-    '<table><tr><th>股票</th><th>總分</th><th>動能（Momentum）</th><th>籌碼（Chip）</th><th>基本面（Fundamental）</th></tr>' + rows + '</table>';
+    '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th><th>產業</th><th>群聚加分</th></tr>'+rows+'</table>';
+
+  /* [v3] 產業群聚 Beta 倍率表 */
+  renderSectorCluster();
   loadWatchlist();
 }
 
-// ── 觀察清單 ──
-function loadWatchlist() {
-  fetch('/api/watchlist').then(function(r) { return r.json(); }).then(function(list) {
-    document.getElementById('watchlist-content').innerHTML = list.map(function(t) {
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2d3748">' +
-        '<span>' + t + '</span>' +
-        '<button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
-    }).join('') || '<p style="color:#718096;font-size:13px">清單為空</p>';
+function renderSectorCluster(){
+  var stocks = DATA.stocks || [];
+  var sectorMap = {};
+  stocks.forEach(function(s){
+    var sec = s.sector || 'OTHER';
+    if(!sectorMap[sec]) sectorMap[sec] = {count:0, bonus:0, mult:1.0};
+    if((s.sector_bonus||0)>0){
+      sectorMap[sec].count++;
+      sectorMap[sec].bonus  = parseFloat(s.sector_bonus);
+      sectorMap[sec].mult   = parseFloat(s.sector_beta_mult||1.0);
+    }
   });
+  var rows = Object.keys(sectorMap).filter(function(s){ return sectorMap[s].count>0; }).map(function(sec){
+    var d    = sectorMap[sec];
+    var base = d.bonus / d.mult;
+    return '<tr>'+
+      '<td style="font-weight:600">'+sec+'</td>'+
+      '<td style="color:#90cdf4">'+d.count+' 檔</td>'+
+      '<td style="color:#a0aec0">+'+base.toFixed(1)+'</td>'+
+      '<td style="color:#d6bcfa">'+d.mult.toFixed(1)+'×</td>'+
+      '<td class="good" style="font-weight:600">+'+d.bonus.toFixed(1)+'</td>'+
+      '</tr>';
+  }).join('');
+  document.getElementById('sector-cluster-tbody').innerHTML = rows ||
+    '<tr><td colspan="5" style="color:#718096;text-align:center">無群聚加分觸發</td></tr>';
 }
 
-function addToWatchlist() {
-  var t = document.getElementById('wl-input').value.trim().toUpperCase();
-  if (!t) return;
-  post('/api/watchlist/add', { ticker: t }).then(function() {
-    loadWatchlist();
-    document.getElementById('wl-input').value = '';
-    toast(t + ' 已加入觀察清單');
-  });
+/* ══════════════════════════════════════════════
+   [v3] 歸因分析頁
+══════════════════════════════════════════════ */
+function loadAttribution(){
+  var days = document.getElementById('attr-days') ? document.getElementById('attr-days').value : 30;
+  document.getElementById('alpha-source-content').innerHTML = '<p style="color:#718096">載入中...</p>';
+  fetch('/api/attribution?days='+days)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      ATTR_DATA = d;
+      renderAlphaSource(d);
+      renderSectorAlpha(d);
+      renderPerTradeAlpha(d);
+      renderUnplanned(d);
+    })
+    .catch(function(e){
+      document.getElementById('alpha-source-content').innerHTML = '<p style="color:#fc8181">載入失敗：'+e.message+'</p>';
+    });
 }
 
-function removeFromWatchlist(t) {
-  post('/api/watchlist/remove', { ticker: t }).then(function() {
-    loadWatchlist();
-    toast(t + ' 已移除');
+function renderAlphaSource(d){
+  if(!d || d.total_trades===0){
+    document.getElementById('alpha-source-content').innerHTML = '<p style="color:#718096">'+( d&&d.message||'無資料')+'</p>';
+    return;
+  }
+  var ab = d.alpha_source_breakdown || {};
+  var total = d.total_trades || 1;
+
+  var html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">';
+  var cats = [
+    {key:'ALPHA',       cls:'src-alpha', label:'真實 Alpha'},
+    {key:'SECTOR_BETA', cls:'src-sector',label:'族群紅利'},
+    {key:'BETA',        cls:'src-beta',  label:'大盤順風'},
+    {key:'MIXED',       cls:'src-mixed', label:'混合 / 虧損'},
+  ];
+  cats.forEach(function(c){
+    var info = ab[c.key] || {count:0,avg_r:0};
+    var pct  = ((info.count/total)*100).toFixed(0);
+    html += '<div style="background:#1a202c;border-radius:8px;padding:12px;text-align:center">'+
+      '<div style="font-size:22px;font-weight:700;color:#e2e8f0">'+pct+'%</div>'+
+      '<div style="margin:4px 0"><span class="'+c.cls+'">'+c.key+'</span></div>'+
+      '<div style="font-size:11px;color:#718096">'+c.label+'</div>'+
+      '<div style="font-size:11px;color:#a0aec0;margin-top:4px">均R: '+(info.count>0?Number(info.avg_r).toFixed(2):'-')+'</div>'+
+      '</div>';
   });
+  html += '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'+
+    '<div style="background:#1a202c;border-radius:8px;padding:10px;text-align:center">'+
+      '<div style="font-size:11px;color:#718096">總交易數</div><div style="font-size:18px;font-weight:700">'+total+'</div></div>'+
+    '<div style="background:#1a202c;border-radius:8px;padding:10px;text-align:center">'+
+      '<div style="font-size:11px;color:#718096">勝率</div><div style="font-size:18px;font-weight:700;color:'+(d.win_rate>=0.5?'#68d391':'#fc8181')+'">'+((d.win_rate||0)*100).toFixed(0)+'%</div></div>'+
+    '<div style="background:#1a202c;border-radius:8px;padding:10px;text-align:center">'+
+      '<div style="font-size:11px;color:#718096">平均R</div><div style="font-size:18px;font-weight:700;color:'+((d.avg_r||0)>=0?'#68d391':'#fc8181')+'">'+Number(d.avg_r||0).toFixed(2)+'R</div></div>'+
+    '<div style="background:#1a202c;border-radius:8px;padding:10px;text-align:center">'+
+      '<div style="font-size:11px;color:#718096">總損益</div><div style="font-size:18px;font-weight:700;color:'+((d.total_pnl||0)>=0?'#68d391':'#fc8181')+'">'+Number(d.total_pnl||0).toLocaleString()+'</div></div>'+
+    '</div>';
+
+  /* 建議 */
+  if(d.suggestions && d.suggestions.length){
+    html += '<div style="margin-top:12px">';
+    d.suggestions.forEach(function(s){
+      var isWarn = s.indexOf('偏低')>=0 || s.indexOf('偏高')>=0 || s.indexOf('大於')>=0;
+      var isFb   = s.indexOf('環境回饋')>=0;
+      html += '<div style="padding:6px 10px;border-radius:6px;margin-bottom:4px;font-size:12px;'+
+        'background:'+(isFb?'#1a365d':isWarn?'#3d2109':'#1a202c')+';'+
+        'color:'+(isFb?'#90cdf4':isWarn?'#f6ad55':'#a0aec0')+'">'+
+        (isFb?'💡 ':isWarn?'⚠ ':'• ')+s+'</div>';
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('alpha-source-content').innerHTML = html;
 }
 
-// ── 工具函式 ──
-function runScheduler() {
+function renderSectorAlpha(d){
+  var sa = (d&&d.sector_alpha_summary) || {};
+  var keys = Object.keys(sa).sort(function(a,b){ return sa[b].avg_alpha - sa[a].avg_alpha; });
+  if(!keys.length){
+    document.getElementById('sector-alpha-content').innerHTML = '<p style="color:#718096;font-size:12px">無產業資料</p>';
+    return;
+  }
+  var rows = keys.map(function(sec){
+    var info  = sa[sec];
+    var alpha = parseFloat(info.avg_alpha || 0);
+    var barW  = Math.min(Math.abs(alpha)*25, 50);
+    var barHtml = alpha >= 0
+      ? '<div class="alpha-bar-wrap"><div class="alpha-bar-pos" style="width:'+barW+'px"></div></div>'
+      : '<div class="alpha-bar-wrap"><div class="alpha-bar-neg" style="width:'+barW+'px"></div></div>';
+    return '<tr>'+
+      '<td style="font-weight:600">'+sec+'</td>'+
+      '<td style="color:#a0aec0">'+info.count+'</td>'+
+      '<td>'+barHtml+'<span style="font-size:11px;color:'+(alpha>=0?'#90cdf4':'#fc8181')+'">'+
+        (alpha>=0?'+':'')+Number(alpha).toFixed(2)+'R</span></td>'+
+      '</tr>';
+  }).join('');
+  document.getElementById('sector-alpha-content').innerHTML =
+    '<table><tr><th>產業</th><th>交易數</th><th>超額Alpha</th></tr>'+rows+'</table>';
+}
+
+function renderRegimeFeedback(){
+  var thresholds = DATA.regime_thresholds || {};
+  var keys = Object.keys(thresholds);
+  var container = document.getElementById('regime-feedback-content');
+  var settingsEl = document.getElementById('settings-regime-threshold');
+
+  if(!keys.length){
+    if(container) container.innerHTML = '<p style="color:#4a5568;font-size:12px">所有 Regime 使用預設門檻（60分）</p>';
+    if(settingsEl) settingsEl.innerHTML = '<p style="color:#4a5568;font-size:12px">目前無覆蓋值，使用預設 60 分</p>';
+    return;
+  }
+  var html = '';
+  keys.forEach(function(reg){
+    var thr = thresholds[reg];
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #1a202c">'+
+      '<div>'+
+        '<span class="badge '+reg+'" style="font-size:10px">'+reg+'</span>'+
+        '<span style="font-size:12px;color:#f6ad55;margin-left:8px">進場門檻已提高至 '+thr+' 分</span>'+
+      '</div>'+
+      '<button class="btn sm gray" onclick="resetThreshold(\''+reg+'\')">重置</button>'+
+      '</div>';
+  });
+  if(container) container.innerHTML = html;
+  if(settingsEl) settingsEl.innerHTML = html || '<p style="color:#4a5568;font-size:12px">目前無覆蓋值</p>';
+}
+
+function renderPerTradeAlpha(d){
+  var trades = (d&&d.alpha_decomposition&&d.alpha_decomposition.per_trade_alpha) || [];
+  if(!trades.length){
+    document.getElementById('per-trade-alpha-content').innerHTML = '<p style="color:#718096;font-size:12px">無資料</p>';
+    return;
+  }
+  var sorted = trades.slice().sort(function(a,b){ return b.individual_alpha - a.individual_alpha; });
+  var rows = sorted.slice(0,20).map(function(t){
+    var alpha   = parseFloat(t.individual_alpha || 0);
+    var barW    = Math.min(Math.abs(alpha)*20, 50);
+    var barHtml = alpha >= 0
+      ? '<div class="alpha-bar-wrap"><div class="alpha-bar-pos" style="width:'+barW+'px"></div></div>'
+      : '<div class="alpha-bar-wrap"><div class="alpha-bar-neg" style="width:'+barW+'px"></div></div>';
+    var srcCls = {ALPHA:'src-alpha', BETA:'src-beta', SECTOR_BETA:'src-sector', MIXED:'src-mixed'};
+    return '<tr>'+
+      '<td style="font-weight:600">'+String(t.ticker||'').trim()+'</td>'+
+      '<td class="'+(t.r>=0?'good':'bad')+'">'+Number(t.r||0).toFixed(2)+'R</td>'+
+      '<td style="color:#718096">'+Number(t.sector_avg_r||0).toFixed(2)+'R</td>'+
+      '<td>'+barHtml+'<span style="font-size:11px;color:'+(alpha>=0?'#90cdf4':'#fc8181')+'">'+
+        (alpha>=0?'+':'')+Number(alpha).toFixed(2)+'R</span></td>'+
+      '<td><span class="'+(srcCls[t.alpha_source]||'src-mixed')+'">'+( t.alpha_source||'MIXED')+'</span></td>'+
+      '<td><span class="badge '+(t.regime||'')+'" style="font-size:10px">'+(t.regime||'-')+'</span></td>'+
+      '</tr>';
+  }).join('');
+  document.getElementById('per-trade-alpha-content').innerHTML =
+    '<table><tr><th>股票</th><th>個股R</th><th>產業均R</th><th>超額Alpha</th><th>歸因</th><th>進場環境</th></tr>'+rows+'</table>';
+}
+
+function renderUnplanned(d){
+  var us = (d&&d.unplanned_summary) || {};
+  if(!us.total_unplanned_decisions){
+    document.getElementById('unplanned-content').innerHTML = '<p style="color:#4a5568;font-size:12px">近期無計畫外交易記錄</p>';
+    return;
+  }
+  var rate   = ((us.unplanned_rate||0)*100).toFixed(0);
+  var rateCl = us.unplanned_rate>0.2?'bad':us.unplanned_rate>0.1?'warn':'good';
+  var html   = '<div class="metric"><span class="label">計畫外交易比率</span><span class="val '+rateCl+'">'+rate+'%</span></div>'+
+    '<div class="metric"><span class="label">計畫外決策數</span><span class="val warn">'+us.total_unplanned_decisions+'</span></div>';
+  if(us.penalty_triggered && us.penalty_triggered.length){
+    html += '<div style="margin-top:8px;font-size:12px;color:#f6ad55">已觸發懲罰係數（×0.80）：'+us.penalty_triggered.join(', ')+'</div>';
+  }
+  if(us.worst_tickers && us.worst_tickers.length){
+    html += '<div style="margin-top:8px"><div style="font-size:11px;color:#718096;margin-bottom:4px">最多計畫外交易標的：</div>';
+    us.worst_tickers.forEach(function(wt){
+      var tk = Array.isArray(wt) ? wt[0] : wt;
+      var cnt= Array.isArray(wt) ? wt[1] : 0;
+      html += '<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">'+
+        '<span>'+tk+'</span><span style="color:#fc8181">'+cnt+' 筆</span></div>';
+    });
+    html += '</div>';
+  }
+  document.getElementById('unplanned-content').innerHTML = html;
+}
+
+/* ══════════════════════════════════════════════
+   工具頁函式
+══════════════════════════════════════════════ */
+function runScheduler(){
   document.getElementById('scheduler-result').innerHTML = '<p style="color:#718096;margin-top:12px">執行中...</p>';
-  fetch('/api/run-scheduler', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
-    if (r.ok) {
+  fetch('/api/run-scheduler',{method:'POST'}).then(function(r){ return r.json(); }).then(function(r){
+    if(r.ok){
       document.getElementById('scheduler-result').innerHTML =
-        '<div class="result-box">' +
-        '<span style="color:#718096">環境（Regime）：</span><span style="font-weight:600">' + r.regime + '</span>&nbsp;&nbsp;' +
-        '<span style="color:#718096">MRS 分數：</span><span style="font-weight:600">' + r.mrs + '</span></div>';
-      toast('宏觀濾網執行完成');
+        '<div class="result-box">'+
+        '<span style="color:#718096">環境：</span><span class="badge '+(r.regime||'')+'" style="font-size:11px">'+(r.regime||'-')+'</span>&nbsp;'+
+        '<span style="color:#718096">MRS：</span><span style="font-weight:600">'+(r.mrs||'-')+'</span>'+
+        '</div>';
+      toast('排程執行完成');
       loadData();
     } else {
-      document.getElementById('scheduler-result').innerHTML = '<div class="result-box bad">失敗：' + r.error + '</div>';
+      document.getElementById('scheduler-result').innerHTML = '<div class="result-box bad">失敗：'+r.error+'</div>';
     }
   });
 }
 
-function runEV() {
-  var ticker = document.getElementById('ev-ticker').value || 'TEST';
-  var score  = document.getElementById('ev-score').value || 60;
-  document.getElementById('ev-result').innerHTML = '<p style="color:#718096;margin-top:12px">模擬中...</p>';
-  post('/api/ev-simulate', { ticker: ticker, score: score }).then(function(r) {
-    var vc = r.ev_total > 0.5 ? 'good' : 'bad';
-    document.getElementById('ev-result').innerHTML =
-      '<div class="result-box">' +
-      '<span style="color:#718096">EV（期望值）：</span><span class="' + vc + '" style="font-weight:600">' + Number(r.ev_total || 0).toFixed(2) + 'R</span>&nbsp;&nbsp;' +
-      '<span style="color:#718096">勝率（Win Rate）：</span><span style="font-weight:600">' + (Number(r.win_rate || 0) * 100).toFixed(0) + '%</span><br>' +
-      '<span style="color:#718096">結論：</span><span class="' + (r.entry_valid ? 'good' : 'bad') + '" style="font-weight:600">' + r.reason + '</span></div>';
-  });
-}
-
-function runBlackSwan() {
-  document.getElementById('bs-result').innerHTML = '<p style="color:#718096;margin-top:12px">檢查中...</p>';
-  fetch('/api/black-swan', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
-    var msg = r.triggered > 0
-      ? '<div class="result-box bad">觸發 ' + r.triggered + ' 個情境</div>'
-      : '<div class="result-box" style="color:#68d391">無黑天鵝情境觸發</div>';
-    document.getElementById('bs-result').innerHTML = msg;
-  });
-}
-
-function runWF() {
+function runWF(){
   document.getElementById('wf-result').innerHTML = '<p style="color:#718096;margin-top:12px">驗證中...</p>';
-  fetch('/api/walk-forward', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
-    if (r.recommended_weights) {
+  fetch('/api/walk-forward',{method:'POST'}).then(function(r){ return r.json(); }).then(function(r){
+    if(r.recommended_weights){
       var w = r.recommended_weights;
-      // 建議標籤中文化
-      var recLabel = { 'DEPLOY': '✓ DEPLOY（部署）', 'ADJUST': '△ ADJUST（調整）', 'REJECT': '✕ REJECT（拒絕）' };
-      var recCls   = { 'DEPLOY': 'good', 'ADJUST': 'warn', 'REJECT': 'bad' };
+      var recLabel = {'DEPLOY':'✓ DEPLOY','ADJUST':'△ ADJUST','REJECT':'✕ REJECT'};
+      var recCls   = {'DEPLOY':'good','ADJUST':'warn','REJECT':'bad'};
       document.getElementById('wf-result').innerHTML =
-        '<div class="result-box">' +
-        '<span style="color:#718096">建議：</span><span class="' + (recCls[r.recommendation] || 'neu') + '" style="font-weight:600">' + (recLabel[r.recommendation] || r.recommendation) + '</span><br>' +
-        '<span style="color:#718096">動能（Momentum）：</span><span style="font-weight:600">' + (w.momentum * 100).toFixed(0) + '%</span> ' +
-        '<span style="color:#718096">籌碼（Chip）：</span><span style="font-weight:600">' + (w.chip * 100).toFixed(0) + '%</span> ' +
-        '<span style="color:#718096">基本面（Fundamental）：</span><span style="font-weight:600">' + (w.fundamental * 100).toFixed(0) + '%</span></div>';
+        '<div class="result-box">'+
+        '<span style="color:#718096">建議：</span><span class="'+(recCls[r.recommendation]||'neu')+'" style="font-weight:600">'+(recLabel[r.recommendation]||r.recommendation)+'</span><br>'+
+        '<span style="color:#718096">動能：</span><span style="font-weight:600">'+((w.momentum||0)*100).toFixed(0)+'%</span>  '+
+        '<span style="color:#718096">籌碼：</span><span style="font-weight:600">'+((w.chip||0)*100).toFixed(0)+'%</span>  '+
+        '<span style="color:#718096">基本面：</span><span style="font-weight:600">'+((w.fundamental||0)*100).toFixed(0)+'%</span>'+
+        '</div>';
     } else {
       document.getElementById('wf-result').innerHTML = '<div class="result-box warn">資料不足，維持預設權重</div>';
     }
   });
 }
 
-function addEvent() {
-  var d      = document.getElementById('event-date').value;
-  var type   = document.getElementById('event-type').value;
-  var name   = document.getElementById('event-name').value;
-  var impact = document.getElementById('event-impact').value;
-  if (!d || !name) { toast('請填入日期與事件名稱', true); return; }
-  post('/api/add-event', { event_date: d, event_type: type, name: name, impact_level: impact }).then(function(r) {
-    if (r.ok) { toast('事件新增成功'); document.getElementById('event-name').value = ''; }
+function runEV(){
+  var ticker = document.getElementById('ev-ticker').value || 'TEST';
+  var score  = document.getElementById('ev-score').value || 60;
+  document.getElementById('ev-result').innerHTML = '<p style="color:#718096;margin-top:12px">模擬中...</p>';
+  post('/api/ev-simulate',{ticker:ticker,score:score}).then(function(r){
+    var vc = r.ev_total>0.5?'good':r.ev_total>0?'warn':'bad';
+    document.getElementById('ev-result').innerHTML =
+      '<div class="result-box">'+
+      '<span style="color:#718096">EV：</span><span class="'+vc+'" style="font-weight:600;font-size:16px">'+Number(r.ev_total||0).toFixed(2)+'R</span><br>'+
+      '<span style="color:#718096">勝率：</span><span style="font-weight:600">'+((r.win_rate||0)*100).toFixed(0)+'%</span>&nbsp;&nbsp;'+
+      '<span style="color:#718096">進場：</span><span class="'+(r.entry_valid?'good':'bad')+'" style="font-weight:600">'+(r.entry_valid?'✓ 有效':'✕ 無效')+'</span><br>'+
+      '<span style="color:#718096;font-size:11px">'+(r.reason||'')+'</span>'+
+      '</div>';
   });
 }
 
-// ── 歷史訊號完整列表 ──
-function renderSignalsFull() {
-  var rows = (DATA.signals || []).map(function(s) {
-    var t = s.logged_at ? new Date(s.logged_at).toLocaleString('zh-TW') : '-';
-    return '<tr>' +
-      '<td style="font-size:11px;color:#718096">' + t + '</td>' +
-      '<td>' + decisionTypeLabel(s.decision_type) + '</td>' +
-      '<td>' + String(s.ticker || '').trim() + '</td>' +
-      '<td>' + signalSourceLabel(s.signal_source) + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
+/* [v3 MODIFIED] 黑天鵝 — 顯示實際減倉結果 */
+function runBlackSwan(){
+  document.getElementById('bs-result').innerHTML = '<p style="color:#718096;margin-top:12px">檢查中...</p>';
+  fetch('/api/black-swan',{method:'POST'}).then(function(r){ return r.json(); }).then(function(r){
+    if(!r.triggered){
+      document.getElementById('bs-result').innerHTML =
+        '<div class="result-box" style="color:#68d391">✓ 無任何情境觸發</div>';
+      return;
+    }
+    var html = '<div class="result-box bad">觸發 '+r.triggered+' 個情境</div>';
+    (r.actions_taken||[]).forEach(function(action){
+      html += '<div style="background:#2d1a1a;border:1px solid #742a2a;border-radius:6px;padding:10px;margin-top:8px">';
+      html += '<div style="font-weight:600;color:#fc8181;margin-bottom:6px">'+action.scenario_name+'</div>';
+      html += '<div style="font-size:12px;color:#a0aec0;margin-bottom:4px">動作：'+action.action+'</div>';
+      /* [v3] 減倉結果顯示 */
+      var rr = action.reduction_result;
+      if(rr && !rr.error && rr.reduced_count > 0){
+        html += '<div style="font-size:12px;color:#f6ad55">'+
+          '已實際減倉：'+rr.reduced_count+' 檔，合計減少市值 '+Number(rr.total_reduced_value).toLocaleString()+' 元'+
+          '</div>';
+        if(rr.detail && rr.detail.length){
+          html += '<div style="font-size:11px;color:#718096;margin-top:4px">';
+          rr.detail.forEach(function(d){
+            if(!d.error)
+              html += String(d.ticker).trim()+' 減 '+d.shares_sold+' 股 · ';
+          });
+          html += '</div>';
+        }
+      } else if(rr && rr.already_below_target){
+        html += '<div style="font-size:12px;color:#68d391">當前曝險已低於目標，無需減倉</div>';
+      } else if(rr && rr.error){
+        html += '<div style="font-size:12px;color:#fc8181">減倉執行失敗：'+rr.error+'</div>';
+      } else if(action.action === 'HALT_NEW_ENTRIES'){
+        html += '<div style="font-size:12px;color:#f6ad55">已停止新進場（不減少現有部位）</div>';
+      }
+      html += '</div>';
+    });
+    document.getElementById('bs-result').innerHTML = html;
+    loadData();
+  });
+}
+
+function addEvent(){
+  var d     = document.getElementById('event-date').value;
+  var type  = document.getElementById('event-type').value;
+  var name  = document.getElementById('event-name').value;
+  var impact= document.getElementById('event-impact').value;
+  if(!d||!name){ toast('請填入日期與事件名稱',true); return; }
+  post('/api/add-event',{event_date:d,event_type:type,name:name,impact_level:impact}).then(function(r){
+    if(r.ok){ toast('事件新增成功'); document.getElementById('event-name').value=''; }
+  });
+}
+
+function renderSignalsFull(){
+  var rows = (DATA.signals||[]).map(function(s){
+    var t = s.logged_at?new Date(s.logged_at).toLocaleString('zh-TW'):'-';
+    return '<tr>'+
+      '<td style="font-size:11px;color:#718096">'+t+'</td>'+
+      '<td>'+decisionTypeLabel(s.decision_type)+'</td>'+
+      '<td>'+String(s.ticker||'').trim()+'</td>'+
+      '<td>'+signalSourceLabel(s.signal_source)+'</td>'+
+      '</tr>';
+  }).join('')||'<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
   document.getElementById('signals-full').innerHTML =
-    '<table><tr><th>時間</th><th>類型（Type）</th><th>股票</th><th>來源（Source）</th></tr>' + rows + '</table>';
+    '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>'+rows+'</table>';
 }
 
-// ── 設定 ──
-function setMode(mode) {
+/* ══════════════════════════════════════════════
+   設定頁
+══════════════════════════════════════════════ */
+function setMode(mode){
   SETTINGS.mode = mode;
-  document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
-  document.getElementById('mode-' + mode).classList.add('active');
-  document.getElementById('mode-desc').textContent = MODE_DESC[mode] || '';
+  document.querySelectorAll('.mode-btn').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById('mode-'+mode).classList.add('active');
+  document.getElementById('mode-desc').textContent = MODE_DESC[mode]||'';
 }
 
-function loadSettings() {
-  fetch('/api/settings').then(function(r) { return r.json(); }).then(function(s) {
+function loadSettings(){
+  fetch('/api/settings').then(function(r){ return r.json(); }).then(function(s){
     SETTINGS = s;
-    setMode(s.mode || 'PAPER');
-    if (s.atr_mult)        { document.getElementById('atr-mult').value   = s.atr_mult;  document.getElementById('atr-mult-val').textContent = s.atr_mult; }
-    if (s.trail_pct)       { document.getElementById('trail-pct').value  = s.trail_pct; document.getElementById('trail-pct-val').textContent = s.trail_pct + '%'; }
-    if (s.score_threshold) { document.getElementById('score-thresh').value = s.score_threshold; document.getElementById('score-thresh-val').textContent = s.score_threshold; }
-    if (s.ev_threshold)    { document.getElementById('ev-thresh').value  = s.ev_threshold; document.getElementById('ev-thresh-val').textContent = s.ev_threshold + 'R'; }
+    setMode(s.mode||'PAPER');
+    if(s.atr_mult_bull)   document.getElementById('atr-bull').value   = s.atr_mult_bull;
+    if(s.atr_mult_choppy) document.getElementById('atr-choppy').value = s.atr_mult_choppy;
+    if(s.atr_mult_bear)   document.getElementById('atr-bear').value   = s.atr_mult_bear;
+    if(s.trail_pct)  { document.getElementById('trail-pct').value   = s.trail_pct;  document.getElementById('trail-pct-val').textContent  = s.trail_pct+'%'; }
+    if(s.score_threshold){ document.getElementById('score-thresh').value = s.score_threshold; document.getElementById('score-thresh-val').textContent = s.score_threshold; }
+    if(s.ev_threshold)   { document.getElementById('ev-thresh').value   = s.ev_threshold;     document.getElementById('ev-thresh-val').textContent    = s.ev_threshold+'R'; }
+  });
+  renderRegimeFeedback();
+}
+
+function saveSettings(){
+  SETTINGS.atr_mult_bull    = parseFloat(document.getElementById('atr-bull').value);
+  SETTINGS.atr_mult_choppy  = parseFloat(document.getElementById('atr-choppy').value);
+  SETTINGS.atr_mult_bear    = parseFloat(document.getElementById('atr-bear').value);
+  SETTINGS.trail_pct        = parseInt(document.getElementById('trail-pct').value);
+  SETTINGS.score_threshold  = parseInt(document.getElementById('score-thresh').value);
+  SETTINGS.ev_threshold     = parseFloat(document.getElementById('ev-thresh').value);
+  post('/api/settings/save', SETTINGS).then(function(){ toast('設定已儲存'); });
+}
+
+function resetThreshold(regime){
+  post('/api/reset-regime-threshold',{regime:regime}).then(function(r){
+    if(r.ok){ toast((regime||'全部')+' 門檻已重置'); loadData(); }
+  });
+}
+function resetAllThresholds(){
+  post('/api/reset-regime-threshold',{}).then(function(r){
+    if(r.ok){ toast('全部門檻已重置'); loadData(); }
   });
 }
 
-function saveSettings() {
-  SETTINGS.atr_mult        = parseFloat(document.getElementById('atr-mult').value);
-  SETTINGS.trail_pct       = parseInt(document.getElementById('trail-pct').value);
-  SETTINGS.score_threshold = parseInt(document.getElementById('score-thresh').value);
-  SETTINGS.ev_threshold    = parseFloat(document.getElementById('ev-thresh').value);
-  post('/api/settings/save', SETTINGS).then(function() { toast('設定已儲存'); });
+/* ── 持倉操作 ── */
+function closePos(id,price){
+  if(!confirm('確認平倉此持倉？')) return;
+  post('/api/close-position',{position_id:id,price:price}).then(function(r){
+    if(r.ok){ toast('已平倉'); loadData(); }
+  });
 }
 
-// ── 初始化：只載入一次，不自動更新 ──
+function toggleAddForm(){
+  var f = document.getElementById('add-pos-form');
+  f.style.display = f.style.display==='none' ? 'block' : 'none';
+}
+
+function addPosition(){
+  var t = document.getElementById('ap-ticker').value.trim().toUpperCase();
+  var p = document.getElementById('ap-price').value;
+  var s = document.getElementById('ap-shares').value;
+  var a = document.getElementById('ap-atr').value;
+  var m = document.getElementById('ap-mult').value || 3.0;
+  if(!t||!p||!s||!a){ toast('請填寫所有欄位',true); return; }
+  post('/api/add-position',{ticker:t,entry_price:p,shares:s,atr:a,atr_multiplier:m}).then(function(r){
+    if(r.ok){ toast(t+' 持倉已新增'); toggleAddForm(); loadData(); }
+  });
+}
+
+/* ── 觀察清單 ── */
+function loadWatchlist(){
+  fetch('/api/watchlist').then(function(r){ return r.json(); }).then(function(list){
+    document.getElementById('watchlist-content').innerHTML = list.map(function(t){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2d3748">'+
+        '<span>'+t+'</span>'+
+        '<button class="btn sm red" onclick="removeFromWatchlist(\''+t+'\')">移除</button></div>';
+    }).join('')||'<p style="color:#718096;font-size:13px">清單為空</p>';
+  });
+}
+
+function addToWatchlist(){
+  var t = document.getElementById('wl-input').value.trim().toUpperCase();
+  if(!t) return;
+  post('/api/watchlist/add',{ticker:t}).then(function(){ loadWatchlist(); document.getElementById('wl-input').value=''; toast(t+' 已加入'); });
+}
+function removeFromWatchlist(t){
+  post('/api/watchlist/remove',{ticker:t}).then(function(){ loadWatchlist(); toast(t+' 已移除'); });
+}
+
+/* ── 標籤轉換 ── */
+function stateLabel(state){
+  var map={'S1_INITIAL_DEFENSE':'S1 防守','S2_BREAKOUT_CONFIRM':'S2 確認','S3_PROFIT_PROTECT':'S3 保護','S4_TRAILING_STOP':'S4 追蹤','S5_ACTIVE_EXIT':'S5 主動出場','STOPPED_OUT':'止損','CLOSED':'已平倉'};
+  return map[state]||state||'-';
+}
+function signalSourceLabel(source){
+  var map={'SELECTION_ENGINE':'選股','MACRO_FILTER':'宏觀','CHIP_MONITOR':'籌碼','WALK_FORWARD':'WF','POSITION_MANAGER':'部位','EXIT_ENGINE':'出場','EVENT_CALENDAR':'事件','CIRCUIT_BREAKER':'熔斷','BLACK_SWAN':'黑天鵝','REBALANCER':'再平衡','SYSTEM':'系統','MANUAL':'人工','VCP':'VCP','ADDON':'加碼'};
+  return map[source]||source||'-';
+}
+function decisionTypeLabel(type){
+  var map={'ENTRY_SIGNAL':'進場訊號','ENTRY_EXECUTED':'進場執行','STATE_CHANGE':'狀態切換','EXIT_SIGNAL':'出場訊號','EXIT_EXECUTED':'出場執行','ADDON_SIGNAL':'加碼訊號','ADDON_EXECUTED':'加碼執行','STOP_ADJUSTMENT':'停損調整','REGIME_CHANGE':'環境切換','EVENT_RULE':'事件規則','CIRCUIT_BREAKER':'熔斷','MANUAL_OVERRIDE':'人工覆蓋','SCENARIO_TRIGGER':'情境觸發'};
+  return map[type]||type||'-';
+}
+
+/* ── 初始化 ── */
 loadData();
-// ⚠ setInterval(loadData, 60000) 已移除，請使用右上角「重新整理」按鈕手動更新
 </script>
 </body>
 </html>
