@@ -24,17 +24,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #
 .good{color:#68d391;} .warn{color:#f6ad55;} .bad{color:#fc8181;} .neu{color:#90cdf4;}
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 6px 8px; color: #718096; border-bottom: 1px solid #2d3748; font-weight: 500; }
-td { padding: 8px; border-bottom: 1px solid #1e2535; vertical-align: middle; }
+td { padding: 8px; border-bottom: 1px solid #1e2535; }
 tr:last-child td { border-bottom: none; }
 .bar-wrap { background:#2d3748; border-radius:4px; height:6px; width:80px; display:inline-block; vertical-align:middle; overflow:hidden; }
 .bar-fill { height:100%; border-radius:4px; background:#4299e1; }
-.tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; background:#2d3748; color:#a0aec0; white-space:nowrap; }
+.tag { display:inline-block; padding:2px 6px; border-radius:4px; font-size:11px; background:#2d3748; color:#a0aec0; margin:1px; }
 .btn { background:#2b6cb0; color:white; border:none; padding:7px 14px; border-radius:7px; cursor:pointer; font-size:13px; white-space:nowrap; }
 .btn:hover{background:#3182ce;} .btn.red{background:#c53030;} .btn.red:hover{background:#e53e3e;}
 .btn.green{background:#276749;} .btn.green:hover{background:#38a169;}
-.btn.amber{background:#744210;color:white;} .btn.amber:hover{background:#b7791f;}
+.btn.amber{background:#744210;} .btn.amber:hover{background:#d69e2e;}
 .btn.sm{padding:4px 10px;font-size:12px;}
-.btn:disabled{opacity:0.5;cursor:not-allowed;}
 .wide { grid-column: span 2; }
 .page { display:none; } .page.active { display:block; }
 input, select { background:#2d3748; border:1px solid #4a5568; color:#e2e8f0; padding:7px 10px; border-radius:6px; font-size:13px; width:100%; }
@@ -50,13 +49,19 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 .slider-row label { font-size:13px; color:#a0aec0; min-width:160px; }
 .slider-row input[type=range] { flex:1; }
 .slider-row span { font-size:13px; color:#90cdf4; min-width:40px; text-align:right; }
-.action-cell { display:flex; gap:4px; align-items:center; flex-wrap:nowrap; }
-.partial-input { width:72px !important; padding:3px 6px !important; font-size:12px !important; }
+
+/* 局部減倉 Modal */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:500; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal { background:#1a1d2e; border:1px solid #2d3748; border-radius:14px; padding:28px; width:380px; }
+.modal h3 { font-size:15px; font-weight:600; color:#90cdf4; margin-bottom:18px; }
+.modal-info { font-size:12px; color:#718096; margin-bottom:14px; line-height:1.6; }
+.modal-actions { display:flex; gap:8px; margin-top:18px; }
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>⚡ Omni-Investment Hub</h1>
+  <h1>&#9889; Omni-Investment Hub</h1>
   <div class="nav">
     <button class="active" onclick="showPage('overview')">總覽</button>
     <button onclick="showPage('positions')">持倉管理</button>
@@ -67,6 +72,27 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   <span id="clock" style="font-size:12px;color:#718096"></span>
 </div>
 
+<!-- 局部減倉 Modal -->
+<div class="modal-overlay" id="reduce-modal">
+  <div class="modal">
+    <h3>&#9986; 局部減倉</h3>
+    <div class="modal-info" id="reduce-modal-info"></div>
+    <div style="margin-bottom:10px">
+      <div class="form-label">減倉股數</div>
+      <input id="reduce-shares" type="number" min="1" placeholder="輸入要賣出的股數">
+    </div>
+    <div style="margin-bottom:10px">
+      <div class="form-label">成交價格</div>
+      <input id="reduce-price" type="number" step="0.01" placeholder="輸入成交價格">
+    </div>
+    <div class="modal-actions">
+      <button class="btn amber" style="flex:1" onclick="confirmReduce()">確認減倉</button>
+      <button class="btn" style="flex:1;background:#2d3748" onclick="closeReduceModal()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 總覽 -->
 <div id="page-overview" class="page active">
   <div class="grid">
     <div class="card">
@@ -78,7 +104,7 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
       <div id="health-content"></div>
     </div>
     <div class="card wide">
-      <div class="card-title">持倉快照 <button class="btn sm green" onclick="showPage('positions')">管理持倉 →</button></div>
+      <div class="card-title">持倉快照 <button class="btn sm green" onclick="showPage('positions')">管理持倉 &#8594;</button></div>
       <div id="pos-preview"></div>
     </div>
     <div class="card">
@@ -92,10 +118,11 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
+<!-- 持倉管理 -->
 <div id="page-positions" class="page">
   <div class="grid">
     <div class="card wide">
-      <div class="card-title">目前持倉（合併顯示） <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button></div>
+      <div class="card-title">目前持倉 <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button></div>
       <div id="add-pos-form" style="display:none;background:#2d3748;padding:16px;border-radius:8px;margin-bottom:16px">
         <div class="form-row">
           <div><div class="form-label">股票代號</div><input id="ap-ticker" placeholder="例：2330"></div>
@@ -118,10 +145,17 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
+<!-- 選股分析 -->
 <div id="page-selection" class="page">
   <div class="grid">
     <div class="card wide">
-      <div class="card-title">選股排行</div>
+      <div class="card-title">
+        選股排行
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:#718096">門檻分數</span>
+          <input id="score-threshold" type="number" value="60" min="0" max="100" style="width:60px" onchange="renderSelection()">
+        </div>
+      </div>
       <div id="selection-content"></div>
     </div>
     <div class="card">
@@ -144,34 +178,50 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
+<!-- 工具 -->
 <div id="page-tools" class="page">
   <div class="grid">
     <div class="card">
       <div class="card-title">每日排程</div>
-      <button class="btn" style="width:100%" onclick="runScheduler()">▶ 執行宏觀濾網</button>
+      <p style="font-size:13px;color:#718096;margin-bottom:16px">手動觸發宏觀濾網，更新市場環境分析</p>
+      <button class="btn" style="width:100%" onclick="runScheduler()">&#9654; 執行宏觀濾網</button>
       <div id="scheduler-result"></div>
     </div>
     <div class="card">
       <div class="card-title">黑天鵝模擬</div>
-      <button class="btn amber" style="width:100%" onclick="runBlackSwan()">⚠ 執行黑天鵝檢查</button>
+      <p style="font-size:13px;color:#718096;margin-bottom:16px">依目前 VIX 等指標檢查黑天鵝觸發條件</p>
+      <button class="btn amber" style="width:100%" onclick="runBlackSwan()">&#9888; 執行黑天鵝檢查</button>
       <div id="bs-result"></div>
     </div>
     <div class="card">
       <div class="card-title">Walk-Forward 驗證</div>
-      <button class="btn" style="width:100%;background:#553c9a" onclick="runWF()">📊 執行 WF 驗證</button>
+      <p style="font-size:13px;color:#718096;margin-bottom:16px">分析歷史績效，更新因子權重建議</p>
+      <button class="btn" style="width:100%;background:#553c9a" onclick="runWF()">&#128202; 執行 WF 驗證</button>
       <div id="wf-result"></div>
     </div>
     <div class="card">
       <div class="card-title">新增財經事件</div>
       <div class="form-row">
         <div><div class="form-label">日期</div><input id="event-date" type="date"></div>
-        <div><div class="form-label">類型</div><input id="event-type" placeholder="FED"></div>
+        <div><div class="form-label">類型</div>
+          <select id="event-type">
+            <option value="FED">FED</option><option value="CPI">CPI</option>
+            <option value="GDP">GDP</option><option value="PMI">PMI</option>
+            <option value="EARNINGS">財報</option><option value="GEOPOLITICAL">地緣政治</option>
+            <option value="OTHER">其他</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <div class="form-label">事件名稱</div>
+        <input id="event-name" placeholder="例：Fed 利率決議">
       </div>
       <div class="form-row">
-        <div><div class="form-label">事件名稱</div><input id="event-name"></div>
-        <div><div class="form-label">影響等級(1-5)</div><input id="event-impact" type="number" value="3"></div>
+        <div><div class="form-label">影響等級（1-5）</div><input id="event-impact" type="number" value="3" min="1" max="5"></div>
+        <div style="display:flex;align-items:flex-end">
+          <button class="btn green" style="width:100%" onclick="addEvent()">新增事件</button>
+        </div>
       </div>
-      <button class="btn green" style="width:100%" onclick="addEvent()">新增事件</button>
     </div>
     <div class="card wide">
       <div class="card-title">歷史訊號記錄</div>
@@ -180,21 +230,24 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
   </div>
 </div>
 
+<!-- 設定 -->
 <div id="page-settings" class="page">
   <div class="grid">
     <div class="card">
       <div class="card-title">執行模式</div>
+      <p style="font-size:13px;color:#718096;margin-bottom:16px">控制系統是否實際下單</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="mode-btn active" id="mode-PAPER" onclick="setMode('PAPER')">Paper</button>
         <button class="mode-btn" id="mode-ALERT_ONLY" onclick="setMode('ALERT_ONLY')">Alert Only</button>
         <button class="mode-btn" id="mode-SEMI_AUTO" onclick="setMode('SEMI_AUTO')">Semi Auto</button>
         <button class="mode-btn" id="mode-FULL_AUTO" onclick="setMode('FULL_AUTO')">Full Auto</button>
       </div>
+      <div id="mode-desc" style="margin-top:12px;font-size:12px;color:#718096"></div>
     </div>
     <div class="card">
-      <div class="card-title">核心參數</div>
+      <div class="card-title">模組參數調整</div>
       <div class="slider-row">
-        <label>ATR 倍數</label>
+        <label>ATR 倍數（進場止損）</label>
         <input type="range" min="1.5" max="5" step="0.5" value="3.0" id="atr-mult" oninput="document.getElementById('atr-mult-val').textContent=this.value">
         <span id="atr-mult-val">3.0</span>
       </div>
@@ -208,39 +261,10 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
         <input type="range" min="40" max="80" step="5" value="60" id="score-thresh" oninput="document.getElementById('score-thresh-val').textContent=this.value">
         <span id="score-thresh-val">60</span>
       </div>
-    </div>
-    <div class="card">
-      <div class="card-title">因子權重 (總和 100%)</div>
       <div class="slider-row">
-        <label>動能因子</label>
-        <input type="range" min="0" max="100" id="w-mom" oninput="updateWVal()">
-        <span id="w-mom-val">30%</span>
-      </div>
-      <div class="slider-row">
-        <label>籌碼因子</label>
-        <input type="range" min="0" max="100" id="w-chip" oninput="updateWVal()">
-        <span id="w-chip-val">25%</span>
-      </div>
-      <div class="slider-row">
-        <label>基本面因子</label>
-        <input type="range" min="0" max="100" id="w-fun" oninput="updateWVal()">
-        <span id="w-fun-val">25%</span>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">篩選範圍</div>
-      <div class="form-row">
-        <div>
-          <div class="form-label">排序範圍</div>
-          <select id="sel-universe">
-            <option value="ALL">全台股</option>
-            <option value="WATCHLIST">觀察清單</option>
-          </select>
-        </div>
-        <div>
-          <div class="form-label">錄取前 % (Top %)</div>
-          <input type="number" id="sel-top-pct" value="100" min="1" max="100">
-        </div>
+        <label>EV 最低門檻</label>
+        <input type="range" min="0" max="2" step="0.1" value="0.5" id="ev-thresh" oninput="document.getElementById('ev-thresh-val').textContent=this.value+'R'">
+        <span id="ev-thresh-val">0.5R</span>
       </div>
       <button class="btn" style="width:100%;margin-top:12px" onclick="saveSettings()">儲存設定</button>
     </div>
@@ -251,45 +275,14 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 
 <script>
 var DATA = {};
-var SETTINGS = { mode: 'PAPER', atr_mult: 3.0, trail_pct: 15, score_threshold: 60, universe: 'ALL', top_pct: 100, weights: { momentum: 0.3, chip: 0.25, fundamental: 0.25 } };
-
-// ── 狀態中文對照表 ──────────────────────────────────────────
-var STATE_LABELS = {
-  'S1_INITIAL_DEFENSE':  '🛡 初始防禦',
-  'S2_BREAKOUT_CONFIRM': '🚀 突破確認',
-  'S3_PROFIT_PROTECT':   '💰 保護獲利',
-  'S4_TRAILING_STOP':    '📈 移動止損',
-  'S5_ACTIVE_EXIT':      '🚪 主動出場',
-  'STOPPED_OUT':         '🔴 停損出場',
-  'CLOSED':              '✅ 已平倉'
+var SETTINGS = { mode: 'PAPER', atr_mult: 3.0, trail_pct: 15, score_threshold: 60, ev_threshold: 0.5 };
+var REDUCE_TARGET = null; // { id, ticker, current_shares }
+var MODE_DESC = {
+  'PAPER': '模擬交易，不實際下單，適合測試與觀察',
+  'ALERT_ONLY': '只發 Telegram 通知，不下單，適合人工決策',
+  'SEMI_AUTO': '大單需人工確認，小單自動執行',
+  'FULL_AUTO': '全自動下單，請確認風控設定正確'
 };
-
-// ── 股票代號中文名稱對照表 ──────────────────────────────────
-var TICKER_NAMES = {
-  '2330': '台積電',  '2317': '鴻海',    '2454': '聯發科',
-  '2382': '廣達',    '2303': '聯電',    '2308': '台達電',
-  '2881': '富邦金',  '2882': '國泰金',  '2891': '中信金',
-  '2886': '兆豐金',  '2884': '玉山金',  '2885': '元大金',
-  '3711': '日月光',  '2357': '華碩',    '2379': '瑞昱',
-  '2395': '研華',    '3034': '聯詠',    '3008': '大立光',
-  '2412': '中華電',  '4938': '和碩',    '2353': '宏碁',
-  '6505': '台塑化',  '1301': '台塑',    '1303': '南亞',
-  '1326': '台化',    '2002': '中鋼',    '5880': '合庫金',
-  '2207': '和泰車',  '2301': '光寶科',  '2327': '國巨',
-  '3045': '台灣大',  '4904': '遠傳',    '2498': '宏達電',
-  '6669': '緯穎',    '3231': '緯創',    '2408': '南亞科',
-  '2344': '華邦電',  '2376': '技嘉',    '2404': '漢唐'
-};
-
-function tickerLabel(ticker) {
-  var t = String(ticker || '').trim();
-  return TICKER_NAMES[t] ? t + ' ' + TICKER_NAMES[t] : t;
-}
-function stateLabel(state) {
-  return STATE_LABELS[state] || state;
-}
-
-// ─────────────────────────────────────────────────────────────
 
 setInterval(function() { document.getElementById('clock').textContent = new Date().toLocaleString('zh-TW'); }, 1000);
 
@@ -321,155 +314,130 @@ function loadData() {
   fetch('/api/data').then(function(r) { return r.json(); }).then(function(d) {
     DATA = d;
     renderOverview();
-    if (document.getElementById('page-positions').classList.contains('active')) renderPositionsFull();
-    if (document.getElementById('page-selection').classList.contains('active')) renderSelection();
+    if (document.getElementById('page-positions').classList.contains('active')) {
+      renderPositionsFull();
+    }
   });
 }
 
 function renderOverview() {
   var reg = DATA.regime || {};
   var h = DATA.health || {};
+  var vixCls = (reg.vix_level || 0) > 25 ? 'warn' : 'good';
+  var expPct = h.gross_exposure_pct ? (h.gross_exposure_pct * 100).toFixed(1) : '0.0';
+  var expCls = h.gross_exposure_pct > 0.8 ? 'bad' : h.gross_exposure_pct > 0.5 ? 'warn' : 'good';
+
   document.getElementById('regime-content').innerHTML =
     '<div style="margin-bottom:12px"><span class="badge ' + (reg.regime || '') + '">' + (reg.regime || 'N/A') + '</span></div>' +
     '<div class="metric"><span class="label">MRS 分數</span><span class="val neu">' + (reg.mrs_score || '-') + '</span></div>' +
-    '<div class="metric"><span class="label">VIX</span><span class="val">' + (reg.vix_level || '-') + '</span></div>';
+    '<div class="metric"><span class="label">VIX</span><span class="val ' + vixCls + '">' + (reg.vix_level || '-') + '</span></div>' +
+    '<div class="metric"><span class="label">曝險上限</span><span class="val neu">' + (reg.max_exposure_limit ? (reg.max_exposure_limit * 100).toFixed(0) + '%' : 'N/A') + '</span></div>';
 
   document.getElementById('health-content').innerHTML =
     '<div class="metric"><span class="label">NAV</span><span class="val neu">' + Number(h.nav || 0).toLocaleString() + ' 元</span></div>' +
-    '<div class="metric"><span class="label">曝險比例</span><span class="val">' + ((h.gross_exposure_pct || 0) * 100).toFixed(1) + '%</span></div>';
+    '<div class="metric"><span class="label">曝險比例</span><span class="val ' + expCls + '">' + expPct + '%</span></div>' +
+    '<div class="metric"><span class="label">VaR 95%</span><span class="val warn">' + (h.portfolio_var_95 ? (h.portfolio_var_95 * 100).toFixed(2) + '%' : 'N/A') + '</span></div>' +
+    '<div class="metric"><span class="label">熔斷狀態</span><span class="val ' + (h.circuit_breaker_triggered ? 'bad' : 'good') + '">' + (h.circuit_breaker_triggered ? '⚠ 觸發' : '正常') + '</span></div>';
 
   var posRows = (DATA.positions || []).slice(0, 5).map(function(p) {
-    return '<tr><td>' + tickerLabel(p.ticker) + '</td><td><span class="tag">' + stateLabel(p.state) + '</span></td><td>' + Number(p.r_multiple_current || 0).toFixed(2) + 'R</td></tr>';
-  }).join('') || '<tr><td colspan="3">無持倉</td></tr>';
-  document.getElementById('pos-preview').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>R</th></tr>' + posRows + '</table>';
+    var r = p.r_multiple_current || 0;
+    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td><span class="tag">' + (p.state || '') + '</span></td><td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(r).toFixed(2) + 'R</td><td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(p.unrealized_pnl || 0).toLocaleString() + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無持倉</td></tr>';
+  document.getElementById('pos-preview').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>R</th><th>未實現損益</th></tr>' + posRows + '</table>';
 
   var chipRows = (DATA.chips || []).map(function(c) {
-    return '<tr><td>' + tickerLabel(c.ticker) + '</td><td>' + Number(c.crs_total || 0).toFixed(1) + '</td></tr>';
-  }).join('');
-  document.getElementById('chip-content').innerHTML = '<table><tr><th>股票</th><th>CRS</th></tr>' + chipRows + '</table>';
+    var sc = c.crs_total || 0;
+    return '<tr><td>' + String(c.ticker || '').trim() + '</td><td class="' + (sc >= 60 ? 'good' : sc >= 40 ? 'neu' : 'bad') + '">' + Number(sc).toFixed(1) + '</td><td>' + (c.three_way_resonance ? '<span class="good">✓</span>' : '-') + '</td></tr>';
+  }).join('') || '<tr><td colspan="3" style="color:#718096;text-align:center">無資料</td></tr>';
+  document.getElementById('chip-content').innerHTML = '<table><tr><th>股票</th><th>CRS</th><th>三向</th></tr>' + chipRows + '</table>';
 
   var sigRows = (DATA.signals || []).slice(0, 5).map(function(s) {
-    return '<tr><td style="font-size:11px">' + new Date(s.logged_at).toLocaleTimeString() + '</td><td>' + (s.decision_type || '') + '</td><td>' + tickerLabel(s.ticker) + '</td></tr>';
-  }).join('');
+    var t = s.logged_at ? new Date(s.logged_at).toLocaleTimeString('zh-TW') : '-';
+    return '<tr><td style="font-size:11px;color:#718096">' + t + '</td><td>' + (s.decision_type || '') + '</td><td>' + String(s.ticker || '').trim() + '</td></tr>';
+  }).join('') || '<tr><td colspan="3" style="color:#718096;text-align:center">無訊號</td></tr>';
   document.getElementById('sig-preview').innerHTML = '<table><tr><th>時間</th><th>類型</th><th>股票</th></tr>' + sigRows + '</table>';
-}
-
-function renderSelection() {
-  var rows = (DATA.stocks || []).map(function(s) {
-    var sc = s.total_score || 0;
-    var pass = s.pass_threshold;
-    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '"><td>' + tickerLabel(s.ticker) + '</td><td>' + Number(sc).toFixed(1) + '</td><td>' + Number(s.score_momentum || 0).toFixed(0) + '</td><td>' + Number(s.score_chip || 0).toFixed(0) + '</td><td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
-  }).join('') || '<tr><td colspan="5">無資料</td></tr>';
-  document.getElementById('selection-content').innerHTML = '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th></tr>' + rows + '</table>';
-  loadWatchlist();
-}
-
-function renderPositionsFull() {
-  var rows = (DATA.positions || []).map(function(p) {
-    var avgCost   = p.avg_cost != null ? Number(p.avg_cost).toFixed(2) : '-';
-    var rMult     = p.r_multiple_current != null ? Number(p.r_multiple_current).toFixed(2) + 'R' : '-';
-    var unrealPnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl).toFixed(0) : '0';
-    var pnlClass  = Number(p.unrealized_pnl) >= 0 ? 'good' : 'bad';
-    var maxShares = p.current_shares || 0;
-    var idsEncoded = encodeURIComponent(JSON.stringify(p.ids || [p.id]));
-    var safeId = String(p.id).replace(/-/g, '');
-
-    return '<tr>' +
-      '<td><strong>' + tickerLabel(p.ticker) + '</strong></td>' +
-      '<td><span class="tag">' + stateLabel(p.state) + '</span></td>' +
-      '<td>' + avgCost + '</td>' +
-      '<td>' + Number(maxShares).toLocaleString() + '</td>' +
-      '<td class="' + pnlClass + '">' + Number(unrealPnl).toLocaleString() + '</td>' +
-      '<td>' + rMult + '</td>' +
-      '<td>' +
-        '<div class="action-cell">' +
-          '<input type="number" class="partial-input" id="ps-' + safeId + '" ' +
-            'placeholder="股數" min="1" max="' + maxShares + '" ' +
-            'title="填入要減倉的股數">' +
-          '<button class="btn sm amber" ' +
-            'data-ids="' + idsEncoded + '" ' +
-            'data-price="' + (p.avg_cost || 0) + '" ' +
-            'data-inputid="ps-' + safeId + '" ' +
-            'data-maxshares="' + maxShares + '" ' +
-            'onclick="closePartial(this)">減倉</button>' +
-          '<button class="btn sm red" ' +
-            'data-ids="' + idsEncoded + '" ' +
-            'data-price="' + (p.avg_cost || 0) + '" ' +
-            'onclick="closePosition(this)">全平</button>' +
-        '</div>' +
-      '</td>' +
-      '</tr>';
-  }).join('') || '<tr><td colspan="7" style="color:#718096;text-align:center">無持倉</td></tr>';
-
-  document.getElementById('positions-full').innerHTML =
-    '<table>' +
-      '<tr><th>股票</th><th>狀態</th><th>平均成本</th><th>持股數</th><th>未實現損益</th><th>R 值</th><th>操作</th></tr>' +
-      rows +
-    '</table>';
-}
-
-// ── 局部平倉 ─────────────────────────────────────────────────
-function closePartial(btn) {
-  var inputId   = btn.getAttribute('data-inputid');
-  var maxShares = parseInt(btn.getAttribute('data-maxshares')) || 0;
-  var shares    = parseInt(document.getElementById(inputId).value);
-
-  if (!shares || shares <= 0) {
-    toast('請在左側輸入框填入要減倉的股數', true);
-    return;
-  }
-  if (shares > maxShares) {
-    toast('減倉股數不能超過持有股數（' + maxShares + '）', true);
-    return;
-  }
-
-  var label = shares >= maxShares ? '全部平倉' : '減倉 ' + shares + ' 股';
-  if (!confirm('確定' + label + '？')) return;
-
-  var ids   = JSON.parse(decodeURIComponent(btn.getAttribute('data-ids')));
-  var price = parseFloat(btn.getAttribute('data-price'));
-  btn.disabled = true;
-  btn.textContent = '處理中';
-
-  post('/api/close-position', { position_ids: ids, price: price, partial_shares: shares })
-    .then(function(r) {
-      if (r.ok) { toast(label + ' 成功'); loadData(); }
-      else {
-        toast('失敗：' + (r.error || '未知錯誤'), true);
-        btn.disabled = false; btn.textContent = '減倉';
-      }
-    })
-    .catch(function(e) {
-      toast('網路錯誤：' + e.message, true);
-      btn.disabled = false; btn.textContent = '減倉';
-    });
-}
-
-// ── 全部平倉 ─────────────────────────────────────────────────
-function closePosition(btn) {
-  if (!confirm('確定全部平倉？')) return;
-  var ids   = JSON.parse(decodeURIComponent(btn.getAttribute('data-ids')));
-  var price = parseFloat(btn.getAttribute('data-price'));
-  btn.disabled = true;
-  btn.textContent = '處理中';
-
-  post('/api/close-position', { position_ids: ids, price: price })
-    .then(function(r) {
-      if (r.ok) { toast('全部平倉成功'); loadData(); }
-      else {
-        toast('失敗：' + (r.error || '未知錯誤'), true);
-        btn.disabled = false; btn.textContent = '全平';
-      }
-    })
-    .catch(function(e) {
-      toast('網路錯誤：' + e.message, true);
-      btn.disabled = false; btn.textContent = '全平';
-    });
 }
 
 function toggleAddForm() {
   var f = document.getElementById('add-pos-form');
   f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+function renderPositionsFull() {
+  var rows = (DATA.positions || []).map(function(p) {
+    var r = p.r_multiple_current || 0;
+    var shares = p.current_shares || 0;
+    return '<tr>' +
+      '<td>' + String(p.ticker || '').trim() + '</td>' +
+      '<td><span class="tag">' + (p.state || '') + '</span></td>' +
+      '<td>' + (p.entry_price || '-') + '</td>' +
+      '<td>' + (p.current_stop_price || '-') + '</td>' +
+      '<td>' + Number(shares).toLocaleString() + '</td>' +
+      '<td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(r).toFixed(2) + 'R</td>' +
+      '<td class="' + (r >= 0 ? 'good' : 'bad') + '">' + Number(p.unrealized_pnl || 0).toLocaleString() + '</td>' +
+      '<td style="display:flex;gap:6px">' +
+        '<button class="btn sm amber" onclick="openReduceModal(\'' + p.id + '\',\'' + String(p.ticker || '').trim() + '\',' + shares + ',' + (p.entry_price || 0) + ')">減倉</button>' +
+        '<button class="btn sm red" onclick="closePosition(\'' + p.id + '\',' + (p.entry_price || 0) + ')">平倉</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('') || '<tr><td colspan="8" style="color:#718096;text-align:center">無持倉</td></tr>';
+  document.getElementById('positions-full').innerHTML =
+    '<table><tr><th>股票</th><th>狀態</th><th>進場價</th><th>止損價</th><th>持股數</th><th>R</th><th>未實現損益</th><th>操作</th></tr>' + rows + '</table>';
+}
+
+// ── 局部減倉 Modal ──────────────────────────────────────
+function openReduceModal(id, ticker, currentShares, entryPrice) {
+  REDUCE_TARGET = { id: id, ticker: ticker, currentShares: currentShares };
+  document.getElementById('reduce-modal-info').innerHTML =
+    '股票：<strong style="color:#90cdf4">' + ticker + '</strong>&nbsp;&nbsp;' +
+    '目前持股：<strong style="color:#90cdf4">' + Number(currentShares).toLocaleString() + ' 股</strong><br>' +
+    '進場價參考：' + entryPrice;
+  document.getElementById('reduce-shares').value = '';
+  document.getElementById('reduce-price').value  = '';
+  document.getElementById('reduce-modal').classList.add('open');
+}
+
+function closeReduceModal() {
+  document.getElementById('reduce-modal').classList.remove('open');
+  REDUCE_TARGET = null;
+}
+
+function confirmReduce() {
+  if (!REDUCE_TARGET) return;
+  var shares = parseInt(document.getElementById('reduce-shares').value);
+  var price  = parseFloat(document.getElementById('reduce-price').value);
+  if (!shares || shares <= 0) { toast('請填入有效的減倉股數', true); return; }
+  if (!price  || price  <= 0) { toast('請填入有效的成交價格', true); return; }
+  if (shares > REDUCE_TARGET.currentShares) {
+    toast('減倉股數不能超過現有持股 ' + REDUCE_TARGET.currentShares + ' 股', true);
+    return;
+  }
+
+  post('/api/reduce-position', {
+    position_id: REDUCE_TARGET.id,
+    exit_shares: shares,
+    exit_price:  price,
+  }).then(function(r) {
+    if (r.ok) {
+      var msg = r.is_fully_closed
+        ? REDUCE_TARGET.ticker + ' 已全數平倉'
+        : REDUCE_TARGET.ticker + ' 減倉 ' + shares + ' 股，剩餘 ' + r.remaining_shares + ' 股';
+      toast(msg);
+      closeReduceModal();
+      loadData();
+    } else {
+      toast('減倉失敗：' + r.error, true);
+    }
+  });
+}
+
+// ── 全數平倉 ────────────────────────────────────────────
+function closePosition(id, price) {
+  if (!confirm('確定全數平倉？')) return;
+  post('/api/close-position', { position_id: id, price: price }).then(function(r) {
+    if (r.ok) { toast('平倉成功'); loadData(); }
+    else toast('失敗：' + r.error, true);
+  });
 }
 
 function addPosition() {
@@ -479,36 +447,40 @@ function addPosition() {
   var atr    = document.getElementById('ap-atr').value;
   var mult   = document.getElementById('ap-mult').value;
   if (!ticker || !price || !shares) { toast('請填入股票、價格、股數', true); return; }
-  post('/api/add-position', { ticker: ticker, entry_price: price, shares: shares, atr: atr || 15, atr_multiplier: mult || 3 })
-    .then(function(r) {
-      if (r.ok) { toast('持倉新增成功'); loadData(); toggleAddForm(); }
-      else toast('失敗：' + r.error, true);
-    });
+  post('/api/add-position', { ticker: ticker, entry_price: price, shares: shares, atr: atr || 15, atr_multiplier: mult || 3 }).then(function(r) {
+    if (r.ok) { toast('持倉新增成功'); loadData(); toggleAddForm(); }
+    else toast('失敗：' + r.error, true);
+  });
+}
+
+function renderSelection() {
+  var thresh = parseInt(document.getElementById('score-threshold').value) || 60;
+  var rows = (DATA.stocks || []).map(function(s) {
+    var sc = s.total_score || 0;
+    var pass = sc >= thresh;
+    var pct = Math.min(100, sc);
+    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '"><td>' + String(s.ticker || '').trim() + (pass ? ' <span class="tag" style="background:#1c4532;color:#68d391">✓</span>' : '') + '</td><td><span class="bar-wrap"><span class="bar-fill" style="width:' + pct + '%"></span></span> ' + Number(sc).toFixed(1) + '</td><td>' + Number(s.score_momentum || 0).toFixed(0) + '</td><td>' + Number(s.score_chip || 0).toFixed(0) + '</td><td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
+  }).join('') || '<tr><td colspan="5" style="color:#718096;text-align:center">無資料</td></tr>';
+  document.getElementById('selection-content').innerHTML = '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th></tr>' + rows + '</table>';
+  loadWatchlist();
 }
 
 function loadWatchlist() {
   fetch('/api/watchlist').then(function(r) { return r.json(); }).then(function(list) {
     document.getElementById('watchlist-content').innerHTML = list.map(function(t) {
-      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2d3748"><span>' + tickerLabel(t) + '</span><button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
-    }).join('') || '清單為空';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2d3748"><span>' + t + '</span><button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
+    }).join('') || '<p style="color:#718096;font-size:13px">清單為空</p>';
   });
 }
 
 function addToWatchlist() {
   var t = document.getElementById('wl-input').value.trim().toUpperCase();
   if (!t) return;
-  post('/api/watchlist/add', { ticker: t }).then(function() {
-    loadWatchlist();
-    document.getElementById('wl-input').value = '';
-    toast(tickerLabel(t) + ' 已加入觀察清單');
-  });
+  post('/api/watchlist/add', { ticker: t }).then(function() { loadWatchlist(); document.getElementById('wl-input').value = ''; toast(t + ' 已加入觀察清單'); });
 }
 
 function removeFromWatchlist(t) {
-  post('/api/watchlist/remove', { ticker: t }).then(function() {
-    loadWatchlist();
-    toast(tickerLabel(t) + ' 已移除');
-  });
+  post('/api/watchlist/remove', { ticker: t }).then(function() { loadWatchlist(); toast(t + ' 已移除'); });
 }
 
 function runScheduler() {
@@ -559,16 +531,15 @@ function addEvent() {
   var name   = document.getElementById('event-name').value;
   var impact = document.getElementById('event-impact').value;
   if (!d || !name) { toast('請填入日期與事件名稱', true); return; }
-  post('/api/add-event', { event_date: d, event_type: type, name: name, impact_level: impact })
-    .then(function(r) {
-      if (r.ok) { toast('事件新增成功'); document.getElementById('event-name').value = ''; }
-    });
+  post('/api/add-event', { event_date: d, event_type: type, name: name, impact_level: impact }).then(function(r) {
+    if (r.ok) { toast('事件新增成功'); document.getElementById('event-name').value = ''; }
+  });
 }
 
 function renderSignalsFull() {
   var rows = (DATA.signals || []).map(function(s) {
     var t = s.logged_at ? new Date(s.logged_at).toLocaleString('zh-TW') : '-';
-    return '<tr><td style="font-size:11px;color:#718096">' + t + '</td><td>' + (s.decision_type || '') + '</td><td>' + tickerLabel(s.ticker) + '</td><td>' + (s.signal_source || '') + '</td></tr>';
+    return '<tr><td style="font-size:11px;color:#718096">' + t + '</td><td>' + (s.decision_type || '') + '</td><td>' + String(s.ticker || '').trim() + '</td><td>' + (s.signal_source || '') + '</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
   document.getElementById('signals-full').innerHTML = '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>' + rows + '</table>';
 }
@@ -577,45 +548,26 @@ function setMode(mode) {
   SETTINGS.mode = mode;
   document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
   document.getElementById('mode-' + mode).classList.add('active');
-}
-
-function updateWVal() {
-  document.getElementById('w-mom-val').textContent  = document.getElementById('w-mom').value + '%';
-  document.getElementById('w-chip-val').textContent = document.getElementById('w-chip').value + '%';
-  document.getElementById('w-fun-val').textContent  = document.getElementById('w-fun').value + '%';
+  document.getElementById('mode-desc').textContent = MODE_DESC[mode] || '';
 }
 
 function loadSettings() {
   fetch('/api/settings').then(function(r) { return r.json(); }).then(function(s) {
     SETTINGS = s;
-    document.getElementById('atr-mult').value    = s.atr_mult;
-    document.getElementById('trail-pct').value   = s.trail_pct;
-    document.getElementById('score-thresh').value = s.score_threshold;
-    if (s.weights) {
-      document.getElementById('w-mom').value  = (s.weights.momentum || 0.3) * 100;
-      document.getElementById('w-chip').value = (s.weights.chip || 0.25) * 100;
-      document.getElementById('w-fun').value  = (s.weights.fundamental || 0.25) * 100;
-    }
-    if (s.universe) document.getElementById('sel-universe').value = s.universe;
-    if (s.top_pct)  document.getElementById('sel-top-pct').value  = s.top_pct;
-    updateWVal();
-    if (s.mode) setMode(s.mode);
+    setMode(s.mode || 'PAPER');
+    if (s.atr_mult)        { document.getElementById('atr-mult').value   = s.atr_mult;   document.getElementById('atr-mult-val').textContent   = s.atr_mult; }
+    if (s.trail_pct)       { document.getElementById('trail-pct').value  = s.trail_pct;  document.getElementById('trail-pct-val').textContent  = s.trail_pct + '%'; }
+    if (s.score_threshold) { document.getElementById('score-thresh').value = s.score_threshold; document.getElementById('score-thresh-val').textContent = s.score_threshold; }
+    if (s.ev_threshold)    { document.getElementById('ev-thresh').value  = s.ev_threshold; document.getElementById('ev-thresh-val').textContent = s.ev_threshold + 'R'; }
   });
 }
 
 function saveSettings() {
-  SETTINGS.weights = {
-    momentum:    parseInt(document.getElementById('w-mom').value) / 100,
-    chip:        parseInt(document.getElementById('w-chip').value) / 100,
-    fundamental: parseInt(document.getElementById('w-fun').value) / 100,
-    valuation:   0.2
-  };
-  SETTINGS.universe        = document.getElementById('sel-universe').value;
-  SETTINGS.top_pct         = parseInt(document.getElementById('sel-top-pct').value);
   SETTINGS.atr_mult        = parseFloat(document.getElementById('atr-mult').value);
   SETTINGS.trail_pct       = parseInt(document.getElementById('trail-pct').value);
   SETTINGS.score_threshold = parseInt(document.getElementById('score-thresh').value);
-  post('/api/settings/save', SETTINGS).then(function() { toast('設定已儲存'); loadData(); });
+  SETTINGS.ev_threshold    = parseFloat(document.getElementById('ev-thresh').value);
+  post('/api/settings/save', SETTINGS).then(function() { toast('設定已儲存'); });
 }
 
 loadData();

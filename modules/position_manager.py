@@ -36,6 +36,19 @@ class PositionManager:
         """)
         return [dict(r) for r in rows]
 
+    async def get_initial_capital(self) -> float:
+        """從 account_config 讀取初始資金"""
+        row = await self.hub.fetchrow("""
+            SELECT initial_capital
+            FROM account_config
+            WHERE is_active = TRUE
+            LIMIT 1
+        """)
+        if row is None:
+            logger.warning("account_config 無有效記錄，fallback 使用 1,000,000")
+            return 1_000_000.0
+        return float(row['initial_capital'])
+
     async def calc_nav(self, positions: list[dict]) -> dict:
         """計算組合淨值與曝險"""
         total_market_value = 0.0
@@ -43,14 +56,15 @@ class PositionManager:
             price = float(p['avg_cost'] or p['entry_price'])
             total_market_value += price * p['current_shares']
 
-        # 假設初始資金 1,000,000（實際應從帳戶 API 取得）
-        initial_capital = 1_000_000.0
+        # 從資料庫讀取初始資金（取代硬編碼 1,000,000）
+        initial_capital = await self.get_initial_capital()
+
         total_pnl = sum(
             float(p['unrealized_pnl'] or 0) + float(p['realized_pnl'] or 0)
             for p in positions
         )
-        nav           = initial_capital + total_pnl
-        cash          = nav - total_market_value
+        nav = initial_capital + total_pnl
+        cash = nav - total_market_value
         gross_exposure = total_market_value / nav if nav > 0 else 0
 
         return {
@@ -58,6 +72,91 @@ class PositionManager:
             'cash_amount':        cash,
             'stock_market_value': total_market_value,
             'gross_exposure_pct': round(gross_exposure, 4),
+        }
+
+    async def partial_exit(
+        self,
+        position_id: str,
+        exit_shares: int,
+        exit_price: float,
+        trade_date: Optional[date] = None,
+    ) -> dict:
+        """
+        局部減倉：減少持倉股數，更新已實現損益。
+        若減倉後 current_shares <= 0，自動全數平倉。
+        """
+        if trade_date is None:
+            trade_date = date.today()
+
+        row = await self.hub.fetchrow(
+            "SELECT * FROM positions WHERE id = $1 AND is_open = TRUE", position_id
+        )
+        if not row:
+            raise ValueError(f"找不到有效持倉 {position_id}")
+
+        position     = dict(row)
+        current_shares = int(position['current_shares'])
+        avg_cost       = float(position['avg_cost'] or position['entry_price'])
+
+        if exit_shares <= 0:
+            raise ValueError("減倉股數必須大於 0")
+        if exit_shares > current_shares:
+            raise ValueError(f"減倉股數 {exit_shares} 超過現有股數 {current_shares}")
+
+        # 計算本次已實現損益
+        realized_this_trade = (exit_price - avg_cost) * exit_shares
+        new_realized_pnl    = float(position['realized_pnl'] or 0) + realized_this_trade
+        new_shares          = current_shares - exit_shares
+        is_fully_closed     = new_shares <= 0
+
+        if is_fully_closed:
+            # 全數平倉
+            await self.hub.execute("""
+                UPDATE positions SET
+                    current_shares  = 0,
+                    realized_pnl    = $1,
+                    unrealized_pnl  = 0,
+                    is_open         = FALSE,
+                    exit_date       = $2,
+                    exit_price      = $3,
+                    exit_reason     = 'MANUAL_PARTIAL_TO_FULL',
+                    state           = 'CLOSED'
+                WHERE id = $4
+            """, round(new_realized_pnl, 2), trade_date, exit_price, position_id)
+            logger.info(
+                "局部減倉導致全數平倉：%s 減 %d 股 @ %.2f，已實現損益 %.0f",
+                position['ticker'].strip(), exit_shares, exit_price, new_realized_pnl,
+            )
+        else:
+            # 部分減倉，更新股數與損益
+            new_unrealized_pnl = (exit_price - avg_cost) * new_shares
+            await self.hub.execute("""
+                UPDATE positions SET
+                    current_shares = $1,
+                    realized_pnl   = $2,
+                    unrealized_pnl = $3
+                WHERE id = $4
+            """,
+                new_shares,
+                round(new_realized_pnl, 2),
+                round(new_unrealized_pnl, 2),
+                position_id,
+            )
+            logger.info(
+                "局部減倉：%s 減 %d 股 @ %.2f，剩餘 %d 股，已實現損益 %.0f",
+                position['ticker'].strip(), exit_shares, exit_price,
+                new_shares, new_realized_pnl,
+            )
+
+        return {
+            'position_id':          position_id,
+            'ticker':               position['ticker'].strip(),
+            'exit_shares':          exit_shares,
+            'exit_price':           exit_price,
+            'remaining_shares':     new_shares,
+            'realized_pnl_added':   round(realized_this_trade, 2),
+            'total_realized_pnl':   round(new_realized_pnl, 2),
+            'is_fully_closed':      is_fully_closed,
         }
 
     def calc_var_95(self, positions: list[dict], nav: float) -> float:
@@ -69,7 +168,7 @@ class PositionManager:
             for p in positions
         )
         daily_vol = 0.02
-        var_95    = portfolio_value * daily_vol * 1.645 / nav
+        var_95 = portfolio_value * daily_vol * 1.645 / nav
         return round(var_95, 4)
 
     def check_circuit_breaker(
@@ -96,33 +195,6 @@ class PositionManager:
             return False, f"{ticker} 佔比 {pct*100:.1f}% 超過上限 {MAX_SINGLE_POSITION_PCT*100:.0f}%"
         return True, ""
 
-    async def _calc_drawdown_and_daily_pnl(self, nav: float) -> tuple[float, float]:
-        """
-        [BUG FIX] 從資料庫歷史快照計算真實的 drawdown 和 daily_pnl_pct。
-        原本 hardcode 為 0.0，導致熔斷機制完全失效。
-        """
-        rows = await self.hub.fetch("""
-            SELECT nav, snapshot_date
-            FROM portfolio_health
-            ORDER BY snapshot_date DESC
-            LIMIT 30
-        """)
-
-        if not rows:
-            return 0.0, 0.0
-
-        navs = [float(r['nav']) for r in rows]
-
-        # 從高點回落（drawdown）：以過去 30 天的最高 NAV 為基準
-        peak_nav = max(navs)
-        drawdown = (peak_nav - nav) / peak_nav if peak_nav > nav else 0.0
-
-        # 單日損益率：與最近一筆快照比較
-        prev_nav     = navs[0] if navs else nav
-        daily_pnl_pct = (nav - prev_nav) / prev_nav if prev_nav > 0 else 0.0
-
-        return round(drawdown, 4), round(daily_pnl_pct, 4)
-
     async def run(self, trade_date: Optional[date] = None) -> dict:
         """執行部位控管，產生組合健康快照"""
         if trade_date is None:
@@ -138,7 +210,7 @@ class PositionManager:
             WHERE trade_date <= $1
             ORDER BY trade_date DESC LIMIT 1
         """, trade_date)
-        regime = regime_row['regime']    if regime_row else 'CHOPPY'
+        regime = regime_row['regime'] if regime_row else 'CHOPPY'
         mrs    = float(regime_row['mrs_score']) if regime_row else 50.0
 
         # 曝險上限
@@ -148,9 +220,9 @@ class PositionManager:
         # VaR
         var_95 = self.calc_var_95(positions, nav)
 
-        # [BUG FIX] 熔斷：改為從 DB 計算真實的 drawdown 和 daily_pnl_pct，
-        # 不再 hardcode 為 0，熔斷機制才能實際運作。
-        drawdown, daily_pnl_pct = await self._calc_drawdown_and_daily_pnl(nav)
+        # 熔斷檢查
+        drawdown      = 0.0
+        daily_pnl_pct = 0.0
         circuit, circuit_reason = self.check_circuit_breaker(drawdown, daily_pnl_pct)
 
         result = {
@@ -158,7 +230,6 @@ class PositionManager:
             'snapshot_date':             trade_date,
             'exposure_level':            exposure_level,
             'drawdown_from_peak':        drawdown,
-            'daily_pnl_pct':             daily_pnl_pct,
             'portfolio_var_95':          var_95,
             'circuit_breaker_triggered': circuit,
             'circuit_breaker_reason':    circuit_reason,
@@ -171,10 +242,10 @@ class PositionManager:
             INSERT INTO portfolio_health (
                 snapshot_date, nav, cash_amount, stock_market_value,
                 gross_exposure_pct, exposure_level,
-                drawdown_from_peak, daily_pnl_pct, portfolio_var_95,
+                drawdown_from_peak, portfolio_var_95,
                 circuit_breaker_triggered, circuit_breaker_reason,
                 regime_snapshot, mrs_snapshot
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
             ON CONFLICT (snapshot_date) DO UPDATE SET
                 nav                       = EXCLUDED.nav,
                 cash_amount               = EXCLUDED.cash_amount,
@@ -182,7 +253,6 @@ class PositionManager:
                 gross_exposure_pct        = EXCLUDED.gross_exposure_pct,
                 exposure_level            = EXCLUDED.exposure_level,
                 drawdown_from_peak        = EXCLUDED.drawdown_from_peak,
-                daily_pnl_pct             = EXCLUDED.daily_pnl_pct,
                 portfolio_var_95          = EXCLUDED.portfolio_var_95,
                 circuit_breaker_triggered = EXCLUDED.circuit_breaker_triggered,
                 circuit_breaker_reason    = EXCLUDED.circuit_breaker_reason,
@@ -196,7 +266,6 @@ class PositionManager:
             nav_data['gross_exposure_pct'],
             exposure_level,
             drawdown,
-            daily_pnl_pct,
             var_95,
             circuit,
             circuit_reason,
@@ -212,7 +281,7 @@ class PositionManager:
         )
 
         logger.info(
-            "部位控管完成：NAV=%.0f 曝險=%.1f%% 回撤=%.1f%% 熔斷=%s",
-            nav, nav_data['gross_exposure_pct'] * 100, drawdown * 100, circuit
+            "部位控管完成：NAV=%.0f 曝險=%.1f%% 熔斷=%s",
+            nav, nav_data['gross_exposure_pct'] * 100, circuit
         )
         return result

@@ -22,7 +22,7 @@ async def get_dashboard_data(hub):
     health = await hub.fetchrow(
         "SELECT nav, gross_exposure_pct, portfolio_var_95, circuit_breaker_triggered, drawdown_from_peak FROM portfolio_health ORDER BY snapshot_date DESC LIMIT 1")
     positions = await hub.fetch(
-        "SELECT id, ticker, state, entry_price, current_stop_price, r_multiple_current, unrealized_pnl, current_shares, avg_cost FROM positions WHERE is_open = TRUE ORDER BY unrealized_pnl DESC NULLS LAST")
+        "SELECT id, ticker, state, entry_price, current_stop_price, r_multiple_current, unrealized_pnl, current_shares FROM positions WHERE is_open = TRUE ORDER BY unrealized_pnl DESC NULLS LAST")
     stocks = await hub.fetch(
         "SELECT ticker, total_score, score_momentum, score_chip, score_fundamental FROM stock_diagnostic WHERE trade_date = (SELECT MAX(trade_date) FROM stock_diagnostic) ORDER BY total_score DESC LIMIT 10")
     signals = await hub.fetch(
@@ -62,83 +62,48 @@ async def handle_api_settings_save(request):
 
 
 async def handle_api_close_position(request):
-    """
-    支援全部平倉與局部平倉。
-    全部平倉：{ position_ids: [...], price: 數字 }
-    局部平倉：{ position_ids: [...], price: 數字, partial_shares: 數字 }
-    """
     hub = request.app['hub']
     body = await request.json()
-    price = float(body.get('price', 0))
-    today = date.today()
+    pid = body.get('position_id')
+    await hub.execute("""
+        UPDATE positions SET is_open=FALSE, exit_date=$1, exit_price=$2,
+        exit_reason='MANUAL_OVERRIDE', state='CLOSED' WHERE id=$3
+    """, date.today(), body.get('price', 0), pid)
+    return web.Response(text='{"ok":true}', content_type='application/json')
 
-    # 相容新版（position_ids 陣列）與舊版（position_id 單筆）
-    ids = body.get('position_ids') or (
-        [body['position_id']] if body.get('position_id') else []
-    )
-    partial_shares = body.get('partial_shares')  # None 表示全部平倉
 
-    if not ids:
+async def handle_api_reduce_position(request):
+    """局部減倉：傳入 position_id, exit_shares, exit_price"""
+    hub  = request.app['hub']
+    body = await request.json()
+    pid         = body.get('position_id')
+    exit_shares = int(body.get('exit_shares', 0))
+    exit_price  = float(body.get('exit_price', 0))
+
+    if not pid or exit_shares <= 0 or exit_price <= 0:
         return web.Response(
-            text=json.dumps({'ok': False, 'error': '缺少 position_id'}),
-            content_type='application/json'
+            text=json.dumps({'ok': False, 'error': '請填入 position_id、exit_shares、exit_price'}),
+            content_type='application/json', status=400,
         )
 
-    for pid in ids:
-        try:
-            if partial_shares:
-                # ── 局部平倉 ──────────────────────────────────────────
-                partial_shares = int(partial_shares)
-                row = await hub.fetchrow(
-                    "SELECT current_shares, avg_cost FROM positions WHERE id=$1", pid
-                )
-                if not row:
-                    continue
-
-                current_shares = int(row['current_shares'])
-                avg_cost = float(row['avg_cost'] or 0)
-                sell_shares = min(partial_shares, current_shares)  # 不超過持有量
-                remaining = current_shares - sell_shares
-                realized_pnl = (price - avg_cost) * sell_shares
-
-                if remaining <= 0:
-                    # 減倉後歸零 → 直接全部平倉
-                    await hub.execute("""
-                        UPDATE positions
-                        SET is_open=FALSE,
-                            current_shares=0,
-                            exit_date=$1,
-                            exit_price=$2,
-                            exit_reason='MANUAL_PARTIAL',
-                            realized_pnl = realized_pnl + $3
-                        WHERE id=$4
-                    """, today, price, realized_pnl, pid)
-                else:
-                    # 還有剩餘持股 → 更新股數與已實現損益
-                    await hub.execute("""
-                        UPDATE positions
-                        SET current_shares=$1,
-                            realized_pnl = realized_pnl + $2
-                        WHERE id=$3
-                    """, remaining, realized_pnl, pid)
-            else:
-                # ── 全部平倉 ──────────────────────────────────────────
-                await hub.execute("""
-                    UPDATE positions
-                    SET is_open=FALSE,
-                        exit_date=$1,
-                        exit_price=$2,
-                        exit_reason='MANUAL_OVERRIDE'
-                    WHERE id=$3
-                """, today, price, pid)
-
-        except Exception as e:
-            return web.Response(
-                text=json.dumps({'ok': False, 'error': str(e)}),
-                content_type='application/json'
-            )
-
-    return web.Response(text='{"ok":true}', content_type='application/json')
+    try:
+        from modules.position_manager import PositionManager
+        pm     = PositionManager(hub)
+        result = await pm.partial_exit(pid, exit_shares, exit_price)
+        return web.Response(
+            text=json.dumps({'ok': True, **result}, default=serialize, ensure_ascii=False),
+            content_type='application/json',
+        )
+    except ValueError as e:
+        return web.Response(
+            text=json.dumps({'ok': False, 'error': str(e)}),
+            content_type='application/json', status=400,
+        )
+    except Exception as e:
+        return web.Response(
+            text=json.dumps({'ok': False, 'error': str(e)}),
+            content_type='application/json', status=500,
+        )
 
 
 async def handle_api_add_position(request):
@@ -249,7 +214,7 @@ async def create_app():
     await hub.connect()
 
     app = web.Application()
-    app['hub'] = hub
+    app['hub']       = hub
     app['watchlist'] = ['2330', '2303', '2454', '2412', '2317', '2382', '3711', '6669']
     app['settings']  = {
         'mode': 'PAPER', 'atr_mult': 3.0,
@@ -262,6 +227,7 @@ async def create_app():
     app.router.add_get('/api/watchlist',         handle_api_watchlist)
     app.router.add_post('/api/settings/save',    handle_api_settings_save)
     app.router.add_post('/api/close-position',   handle_api_close_position)
+    app.router.add_post('/api/reduce-position',  handle_api_reduce_position)   # ← 局部減倉
     app.router.add_post('/api/add-position',     handle_api_add_position)
     app.router.add_post('/api/add-event',        handle_api_add_event)
     app.router.add_post('/api/watchlist/add',    handle_api_watchlist_add)
