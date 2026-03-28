@@ -172,25 +172,31 @@ async def handle_api_reduce_position(request):
 
 
 async def handle_api_add_position(request):
-    hub    = request.app['hub']
-    body   = await request.json()
-    ticker = body['ticker'].ljust(6)[:6]
-    entry  = float(body['entry_price'])
-    shares = int(body['shares'])
-    atr    = float(body.get('atr', 15.0))
-    mult   = float(body.get('atr_multiplier', 3.0))
-    stop   = entry - atr * mult
-    r      = atr * mult
-    await hub.execute("""
-        INSERT INTO positions (
-            ticker, state, entry_date, entry_price,
-            initial_shares, current_shares, signal_source,
-            atr_at_entry, atr_multiplier, initial_stop_price,
-            r_amount, current_stop_price, trail_pct, avg_cost,
-            s1_atr_mult_applied
-        ) VALUES ($1,'S1_INITIAL_DEFENSE',$2,$3,$4,$4,'MANUAL',$5,$6,$7,$8,$7,0.15,$3,$6)
-    """, ticker, date.today(), entry, shares, atr, mult, stop, r)
-    return web.Response(text='{"ok":true}', content_type='application/json')
+    hub  = request.app['hub']
+    body = await request.json()
+    try:
+        ticker = body['ticker'].ljust(6)[:6]
+        entry  = float(body['entry_price'])
+        shares = int(body['shares'])
+        atr    = float(body.get('atr', 15.0))
+        mult   = float(body.get('atr_multiplier', 3.0))
+        stop   = entry - atr * mult
+        r      = atr * mult
+        await hub.execute("""
+            INSERT INTO positions (
+                ticker, state, entry_date, entry_price,
+                initial_shares, current_shares, signal_source,
+                atr_at_entry, atr_multiplier, initial_stop_price,
+                r_amount, current_stop_price, trail_pct, avg_cost,
+                s1_atr_mult_applied
+            ) VALUES ($1,'S1_INITIAL_DEFENSE',$2,$3,$4,$4,'MANUAL',$5,$6,$7,$8,$7,0.15,$3,$6)
+        """, ticker, date.today(), entry, shares, atr, mult, stop, r)
+        return web.Response(text='{"ok":true}', content_type='application/json')
+    except Exception as e:
+        return web.Response(
+            text=json.dumps({'ok': False, 'error': str(e)}),
+            content_type='application/json', status=500,
+        )
 
 
 async def handle_api_add_event(request):
