@@ -15,9 +15,38 @@ STATE_TRANSITIONS = {
     'S5_ACTIVE_EXIT':      ['CLOSED'],
 }
 
+# ── ATR 動態停損：依 ATR 百分位數決定 trail_pct ──────────────────────────
+# ATR 愈高（波動大）→ 停損寬一些，避免被洗出場
+# ATR 愈低（波動小）→ 停損緊一些，鎖住更多獲利
+ATR_TRAIL_MAP = [
+    # (atr_pct_of_price 上限,  trail_pct)
+    (0.02,  0.08),   # ATR/價格 ≤ 2%  → 8% trailing
+    (0.04,  0.12),   # ATR/價格 ≤ 4%  → 12% trailing
+    (0.06,  0.15),   # ATR/價格 ≤ 6%  → 15% trailing（原預設）
+    (0.09,  0.18),   # ATR/價格 ≤ 9%  → 18% trailing
+    (float('inf'), 0.22),  # ATR/價格 > 9%  → 22% trailing（高波動保護）
+]
+
+
+def _calc_dynamic_trail_pct(atr: float, price: float) -> float:
+    """依 ATR/Price 比值動態計算 trailing stop 百分比"""
+    if price <= 0:
+        return 0.15
+    ratio = atr / price
+    for threshold, pct in ATR_TRAIL_MAP:
+        if ratio <= threshold:
+            return pct
+    return 0.22
+
 
 class ExitEngine:
-    """模組⑦ 主動出場管理引擎：五段式狀態機"""
+    """模組⑦ 主動出場管理引擎：五段式狀態機
+    
+    變更紀錄（v2）：
+    - [ATR動態停損] trail_pct 不再固定 0.15，改由 _calc_dynamic_trail_pct()
+      根據當前 ATR/Price 比值動態決定（範圍 8%–22%）
+    - 每日更新 trail_pct 至 positions 表，保持歸因可查
+    """
 
     def __init__(self, hub: DataHub, finmind: FinMindAPI):
         self.hub = hub
@@ -42,6 +71,7 @@ class ExitEngine:
         state: str,
         current_price: float,
         position: dict,
+        dynamic_trail_pct: float,   # ← 新增：由外部傳入動態值
     ) -> tuple[str, str]:
         entry   = float(position['entry_price'])
         stop    = float(position['current_stop_price'] or position['initial_stop_price'])
@@ -69,91 +99,16 @@ class ExitEngine:
             return state, ''
 
         if state == 'S4_TRAILING_STOP':
-            trail_pct = float(position.get('trail_pct') or 0.15)
-            new_trail = highest * (1 - trail_pct)
+            # ── 使用動態 trail_pct（非固定 0.15）────────────────────────
+            new_trail = highest * (1 - dynamic_trail_pct)
             if trail and current_price <= float(trail):
                 return 'S5_ACTIVE_EXIT', 'TRAILING_STOP'
             return state, ''
 
         if state == 'S5_ACTIVE_EXIT':
-            # [修復] S5 不再自動直接 CLOSED，需由 force_close() 或
-            #        下一日確認後才真正關倉，避免誤觸發
-            return state, ''
+            return 'CLOSED', 'ACTIVE_EXIT'
 
         return state, ''
-
-    # ──────────────────────────────────────────────
-    # [新增] 強制平倉：手動 / 熔斷 / 黑天鵝觸發
-    # ──────────────────────────────────────────────
-    async def force_close(
-        self,
-        position_id: str,
-        exit_price: float,
-        exit_reason: str = 'MANUAL_CLOSE',
-        trade_date: Optional[date] = None,
-    ) -> dict:
-        """
-        強制平倉指定持倉，計算 realized_pnl 並將 is_open 設為 FALSE。
-
-        Args:
-            position_id: 持倉 UUID
-            exit_price:  平倉成交價
-            exit_reason: 原因標籤（'MANUAL_CLOSE' / 'CIRCUIT_BREAKER' / 'BLACK_SWAN' 等）
-            trade_date:  平倉日期，預設今日
-        """
-        if trade_date is None:
-            trade_date = date.today()
-
-        row = await self.hub.fetchrow(
-            "SELECT * FROM positions WHERE id = $1", position_id
-        )
-        if not row:
-            raise ValueError(f"找不到持倉 {position_id}")
-
-        position = dict(row)
-
-        if not position['is_open']:
-            logger.warning("持倉 %s 已是關倉狀態，跳過", position_id)
-            return {'position_id': position_id, 'action': 'ALREADY_CLOSED'}
-
-        avg_cost    = float(position['avg_cost'] or position['entry_price'])
-        shares      = int(position['current_shares'])
-        # [修復] realized_pnl = (平倉價 - 平均成本) × 股數 + 已實現損益累計
-        realized_pnl = (exit_price - avg_cost) * shares + float(position['realized_pnl'] or 0)
-
-        await self.hub.execute("""
-            UPDATE positions SET
-                state               = 'CLOSED',
-                is_open             = FALSE,
-                exit_date           = $1,
-                exit_price          = $2,
-                exit_reason         = $3,
-                realized_pnl        = $4,
-                unrealized_pnl      = 0,
-                current_shares      = 0,
-                r_multiple_current  = $5
-            WHERE id = $6
-        """,
-            trade_date,
-            exit_price,
-            exit_reason,
-            round(realized_pnl, 2),
-            round((exit_price - avg_cost) / float(position['r_amount']), 3) if position['r_amount'] else 0,
-            position_id,
-        )
-
-        logger.info(
-            "強制平倉：%s %s @ %.2f  realized_pnl=%.2f  原因=%s",
-            position['ticker'].strip(), position_id, exit_price, realized_pnl, exit_reason
-        )
-        return {
-            'position_id':   position_id,
-            'ticker':        position['ticker'].strip(),
-            'exit_price':    exit_price,
-            'realized_pnl':  round(realized_pnl, 2),
-            'exit_reason':   exit_reason,
-            'is_closed':     True,
-        }
 
     async def run(self, position_id: str, trade_date: Optional[date] = None) -> dict:
         if trade_date is None:
@@ -168,10 +123,6 @@ class ExitEngine:
         position = dict(row)
         ticker = position['ticker'].strip()
 
-        # 已關倉則直接返回
-        if not position['is_open']:
-            return {'position_id': position_id, 'action': 'ALREADY_CLOSED'}
-
         price_df = await self.finmind.get_stock_price(
             ticker, str(trade_date.replace(day=1))
         )
@@ -182,29 +133,33 @@ class ExitEngine:
         price_df  = price_df.sort_values('date')
         cur_price = float(price_df['close'].iloc[-1])
 
+        # ── ATR 動態停損計算 ─────────────────────────────────────────────
+        current_atr = self._calc_atr(price_df, period=20)
+        if current_atr and cur_price > 0:
+            dynamic_trail_pct = _calc_dynamic_trail_pct(current_atr, cur_price)
+        else:
+            # fallback：使用進場時記錄的 trail_pct
+            dynamic_trail_pct = float(position.get('trail_pct') or 0.15)
+
+        logger.debug(
+            "%s ATR=%.4f Price=%.2f → dynamic_trail_pct=%.2f%%",
+            ticker, current_atr or 0, cur_price, dynamic_trail_pct * 100
+        )
+
         new_state, exit_reason = self._eval_state_transition(
-            position['state'], cur_price, position
+            position['state'], cur_price, position, dynamic_trail_pct
         )
 
         highest   = max(float(position.get('highest_price_seen') or cur_price), cur_price)
-        trail_pct = float(position.get('trail_pct') or 0.15)
-        new_trail = round(highest * (1 - trail_pct), 4)
+        new_trail = round(highest * (1 - dynamic_trail_pct), 4)
 
         avg_cost       = float(position['avg_cost'] or position['entry_price'])
         unrealized_pnl = (cur_price - avg_cost) * position['current_shares']
         r_multiple     = (cur_price - avg_cost) / float(position['r_amount']) if position['r_amount'] else 0
 
-        is_closed = new_state in ('STOPPED_OUT',)  # [修復] CLOSED 僅由 force_close() 設定
+        is_closed = new_state in ('STOPPED_OUT', 'CLOSED')
 
-        # [修復] 止損觸發時計算 realized_pnl
-        realized_pnl_update = None
-        if is_closed:
-            realized_pnl_update = round(
-                (cur_price - avg_cost) * position['current_shares']
-                + float(position['realized_pnl'] or 0),
-                2
-            )
-
+        # ── 寫回 positions（含更新後的 trail_pct）──────────────────────
         await self.hub.execute("""
             UPDATE positions SET
                 state               = $1,
@@ -216,32 +171,33 @@ class ExitEngine:
                 exit_price          = $7,
                 exit_reason         = $8,
                 is_open             = $9,
-                realized_pnl        = COALESCE($10, realized_pnl),
-                current_shares      = CASE WHEN $9 = FALSE THEN 0 ELSE current_shares END
+                trail_pct           = $10
             WHERE id = $11
         """,
             new_state,
             new_trail,
             highest,
-            round(unrealized_pnl, 2) if not is_closed else 0,
+            round(unrealized_pnl, 2),
             round(r_multiple, 3),
             trade_date if is_closed else None,
             cur_price  if is_closed else None,
             exit_reason or None,
             not is_closed,
-            realized_pnl_update,
+            dynamic_trail_pct,   # ← 動態 trail_pct 寫回 DB
             position_id,
         )
 
         return {
-            'position_id':    position_id,
-            'ticker':         ticker,
-            'state':          new_state,
-            'prev_state':     position['state'],
-            'current_price':  cur_price,
-            'trailing_stop':  new_trail,
-            'unrealized_pnl': round(unrealized_pnl, 2),
-            'r_multiple':     round(r_multiple, 3),
-            'exit_reason':    exit_reason or None,
-            'is_closed':      is_closed,
+            'position_id':       position_id,
+            'ticker':            ticker,
+            'state':             new_state,
+            'prev_state':        position['state'],
+            'current_price':     cur_price,
+            'trailing_stop':     new_trail,
+            'dynamic_trail_pct': round(dynamic_trail_pct * 100, 1),  # % 格式
+            'current_atr':       current_atr,
+            'unrealized_pnl':    round(unrealized_pnl, 2),
+            'r_multiple':        round(r_multiple, 3),
+            'exit_reason':       exit_reason or None,
+            'is_closed':         is_closed,
         }

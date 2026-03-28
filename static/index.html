@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>Omni-Investment Hub</title>
 <style>
-/* CSS 保持不變，維持原有樣式 */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f1117; color: #e2e8f0; }
 .header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
@@ -25,16 +24,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #
 .good{color:#68d391;} .warn{color:#f6ad55;} .bad{color:#fc8181;} .neu{color:#90cdf4;}
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 6px 8px; color: #718096; border-bottom: 1px solid #2d3748; font-weight: 500; }
-td { padding: 8px; border-bottom: 1px solid #1e2535; }
+td { padding: 8px; border-bottom: 1px solid #1e2535; vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 .bar-wrap { background:#2d3748; border-radius:4px; height:6px; width:80px; display:inline-block; vertical-align:middle; overflow:hidden; }
 .bar-fill { height:100%; border-radius:4px; background:#4299e1; }
-.tag { display:inline-block; padding:2px 6px; border-radius:4px; font-size:11px; background:#2d3748; color:#a0aec0; margin:1px; }
+.tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; background:#2d3748; color:#a0aec0; white-space:nowrap; }
 .btn { background:#2b6cb0; color:white; border:none; padding:7px 14px; border-radius:7px; cursor:pointer; font-size:13px; white-space:nowrap; }
 .btn:hover{background:#3182ce;} .btn.red{background:#c53030;} .btn.red:hover{background:#e53e3e;}
 .btn.green{background:#276749;} .btn.green:hover{background:#38a169;}
-.btn.amber{background:#744210;} .btn.amber:hover{background:#d69e2e;}
+.btn.amber{background:#744210;color:white;} .btn.amber:hover{background:#b7791f;}
 .btn.sm{padding:4px 10px;font-size:12px;}
+.btn:disabled{opacity:0.5;cursor:not-allowed;}
 .wide { grid-column: span 2; }
 .page { display:none; } .page.active { display:block; }
 input, select { background:#2d3748; border:1px solid #4a5568; color:#e2e8f0; padding:7px 10px; border-radius:6px; font-size:13px; width:100%; }
@@ -50,6 +50,8 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 .slider-row label { font-size:13px; color:#a0aec0; min-width:160px; }
 .slider-row input[type=range] { flex:1; }
 .slider-row span { font-size:13px; color:#90cdf4; min-width:40px; text-align:right; }
+.action-cell { display:flex; gap:4px; align-items:center; flex-wrap:nowrap; }
+.partial-input { width:72px !important; padding:3px 6px !important; font-size:12px !important; }
 </style>
 </head>
 <body>
@@ -251,6 +253,44 @@ input:focus, select:focus { outline:none; border-color:#4299e1; }
 var DATA = {};
 var SETTINGS = { mode: 'PAPER', atr_mult: 3.0, trail_pct: 15, score_threshold: 60, universe: 'ALL', top_pct: 100, weights: { momentum: 0.3, chip: 0.25, fundamental: 0.25 } };
 
+// ── 狀態中文對照表 ──────────────────────────────────────────
+var STATE_LABELS = {
+  'S1_INITIAL_DEFENSE':  '🛡 初始防禦',
+  'S2_BREAKOUT_CONFIRM': '🚀 突破確認',
+  'S3_PROFIT_PROTECT':   '💰 保護獲利',
+  'S4_TRAILING_STOP':    '📈 移動止損',
+  'S5_ACTIVE_EXIT':      '🚪 主動出場',
+  'STOPPED_OUT':         '🔴 停損出場',
+  'CLOSED':              '✅ 已平倉'
+};
+
+// ── 股票代號中文名稱對照表 ──────────────────────────────────
+var TICKER_NAMES = {
+  '2330': '台積電',  '2317': '鴻海',    '2454': '聯發科',
+  '2382': '廣達',    '2303': '聯電',    '2308': '台達電',
+  '2881': '富邦金',  '2882': '國泰金',  '2891': '中信金',
+  '2886': '兆豐金',  '2884': '玉山金',  '2885': '元大金',
+  '3711': '日月光',  '2357': '華碩',    '2379': '瑞昱',
+  '2395': '研華',    '3034': '聯詠',    '3008': '大立光',
+  '2412': '中華電',  '4938': '和碩',    '2353': '宏碁',
+  '6505': '台塑化',  '1301': '台塑',    '1303': '南亞',
+  '1326': '台化',    '2002': '中鋼',    '5880': '合庫金',
+  '2207': '和泰車',  '2301': '光寶科',  '2327': '國巨',
+  '3045': '台灣大',  '4904': '遠傳',    '2498': '宏達電',
+  '6669': '緯穎',    '3231': '緯創',    '2408': '南亞科',
+  '2344': '華邦電',  '2376': '技嘉',    '2404': '漢唐'
+};
+
+function tickerLabel(ticker) {
+  var t = String(ticker || '').trim();
+  return TICKER_NAMES[t] ? t + ' ' + TICKER_NAMES[t] : t;
+}
+function stateLabel(state) {
+  return STATE_LABELS[state] || state;
+}
+
+// ─────────────────────────────────────────────────────────────
+
 setInterval(function() { document.getElementById('clock').textContent = new Date().toLocaleString('zh-TW'); }, 1000);
 
 function showPage(name) {
@@ -296,20 +336,20 @@ function renderOverview() {
 
   document.getElementById('health-content').innerHTML =
     '<div class="metric"><span class="label">NAV</span><span class="val neu">' + Number(h.nav || 0).toLocaleString() + ' 元</span></div>' +
-    '<div class="metric"><span class="label">曝險比例</span><span class="val">' + (h.gross_exposure_pct * 100).toFixed(1) + '%</span></div>';
+    '<div class="metric"><span class="label">曝險比例</span><span class="val">' + ((h.gross_exposure_pct || 0) * 100).toFixed(1) + '%</span></div>';
 
   var posRows = (DATA.positions || []).slice(0, 5).map(function(p) {
-    return '<tr><td>' + String(p.ticker || '').trim() + '</td><td><span class="tag">' + (p.state || '') + '</span></td><td>' + Number(p.r_multiple_current || 0).toFixed(2) + 'R</td></tr>';
+    return '<tr><td>' + tickerLabel(p.ticker) + '</td><td><span class="tag">' + stateLabel(p.state) + '</span></td><td>' + Number(p.r_multiple_current || 0).toFixed(2) + 'R</td></tr>';
   }).join('') || '<tr><td colspan="3">無持倉</td></tr>';
   document.getElementById('pos-preview').innerHTML = '<table><tr><th>股票</th><th>狀態</th><th>R</th></tr>' + posRows + '</table>';
 
   var chipRows = (DATA.chips || []).map(function(c) {
-    return '<tr><td>' + String(c.ticker || '').trim() + '</td><td>' + Number(c.crs_total || 0).toFixed(1) + '</td></tr>';
+    return '<tr><td>' + tickerLabel(c.ticker) + '</td><td>' + Number(c.crs_total || 0).toFixed(1) + '</td></tr>';
   }).join('');
   document.getElementById('chip-content').innerHTML = '<table><tr><th>股票</th><th>CRS</th></tr>' + chipRows + '</table>';
 
   var sigRows = (DATA.signals || []).slice(0, 5).map(function(s) {
-    return '<tr><td style="font-size:11px">' + new Date(s.logged_at).toLocaleTimeString() + '</td><td>' + (s.decision_type || '') + '</td><td>' + String(s.ticker || '').trim() + '</td></tr>';
+    return '<tr><td style="font-size:11px">' + new Date(s.logged_at).toLocaleTimeString() + '</td><td>' + (s.decision_type || '') + '</td><td>' + tickerLabel(s.ticker) + '</td></tr>';
   }).join('');
   document.getElementById('sig-preview').innerHTML = '<table><tr><th>時間</th><th>類型</th><th>股票</th></tr>' + sigRows + '</table>';
 }
@@ -318,7 +358,7 @@ function renderSelection() {
   var rows = (DATA.stocks || []).map(function(s) {
     var sc = s.total_score || 0;
     var pass = s.pass_threshold;
-    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '"><td>' + String(s.ticker || '').trim() + '</td><td>' + Number(sc).toFixed(1) + '</td><td>' + Number(s.score_momentum || 0).toFixed(0) + '</td><td>' + Number(s.score_chip || 0).toFixed(0) + '</td><td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
+    return '<tr style="opacity:' + (pass ? 1 : 0.4) + '"><td>' + tickerLabel(s.ticker) + '</td><td>' + Number(sc).toFixed(1) + '</td><td>' + Number(s.score_momentum || 0).toFixed(0) + '</td><td>' + Number(s.score_chip || 0).toFixed(0) + '</td><td>' + Number(s.score_fundamental || 0).toFixed(0) + '</td></tr>';
   }).join('') || '<tr><td colspan="5">無資料</td></tr>';
   document.getElementById('selection-content').innerHTML = '<table><tr><th>股票</th><th>總分</th><th>動能</th><th>籌碼</th><th>基本面</th></tr>' + rows + '</table>';
   loadWatchlist();
@@ -326,40 +366,105 @@ function renderSelection() {
 
 function renderPositionsFull() {
   var rows = (DATA.positions || []).map(function(p) {
-    var avgCost = p.avg_cost != null ? Number(p.avg_cost).toFixed(2) : '-';
-    var rMult   = p.r_multiple_current != null ? Number(p.r_multiple_current).toFixed(2) + 'R' : '-';
+    var avgCost   = p.avg_cost != null ? Number(p.avg_cost).toFixed(2) : '-';
+    var rMult     = p.r_multiple_current != null ? Number(p.r_multiple_current).toFixed(2) + 'R' : '-';
     var unrealPnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl).toFixed(0) : '0';
     var pnlClass  = Number(p.unrealized_pnl) >= 0 ? 'good' : 'bad';
-    // 用 data-* 屬性儲存 ids（避免 HTML onclick 字串拼接破壞引號）
-    var idsEncoded = encodeURIComponent(JSON.stringify(p.ids || []));
+    var maxShares = p.current_shares || 0;
+    var idsEncoded = encodeURIComponent(JSON.stringify(p.ids || [p.id]));
+    var safeId = String(p.id).replace(/-/g, '');
+
     return '<tr>' +
-      '<td><strong>' + String(p.ticker || '').trim() + '</strong></td>' +
-      '<td><span class="tag">' + (p.state || '-') + '</span></td>' +
+      '<td><strong>' + tickerLabel(p.ticker) + '</strong></td>' +
+      '<td><span class="tag">' + stateLabel(p.state) + '</span></td>' +
       '<td>' + avgCost + '</td>' +
-      '<td>' + Number(p.current_shares || 0).toLocaleString() + '</td>' +
-      '<td class="' + pnlClass + '">' + unrealPnl + '</td>' +
+      '<td>' + Number(maxShares).toLocaleString() + '</td>' +
+      '<td class="' + pnlClass + '">' + Number(unrealPnl).toLocaleString() + '</td>' +
       '<td>' + rMult + '</td>' +
-      '<td><button class="btn sm red" data-ids="' + idsEncoded + '" data-price="' + (p.avg_cost || 0) + '" onclick="closePosition(this)">平倉</button></td>' +
+      '<td>' +
+        '<div class="action-cell">' +
+          '<input type="number" class="partial-input" id="ps-' + safeId + '" ' +
+            'placeholder="股數" min="1" max="' + maxShares + '" ' +
+            'title="填入要減倉的股數">' +
+          '<button class="btn sm amber" ' +
+            'data-ids="' + idsEncoded + '" ' +
+            'data-price="' + (p.avg_cost || 0) + '" ' +
+            'data-inputid="ps-' + safeId + '" ' +
+            'data-maxshares="' + maxShares + '" ' +
+            'onclick="closePartial(this)">減倉</button>' +
+          '<button class="btn sm red" ' +
+            'data-ids="' + idsEncoded + '" ' +
+            'data-price="' + (p.avg_cost || 0) + '" ' +
+            'onclick="closePosition(this)">全平</button>' +
+        '</div>' +
+      '</td>' +
       '</tr>';
   }).join('') || '<tr><td colspan="7" style="color:#718096;text-align:center">無持倉</td></tr>';
+
   document.getElementById('positions-full').innerHTML =
-    '<table><tr><th>股票</th><th>狀態</th><th>平均成本</th><th>總股數</th><th>未實現損益</th><th>R 值</th><th>操作</th></tr>' + rows + '</table>';
+    '<table>' +
+      '<tr><th>股票</th><th>狀態</th><th>平均成本</th><th>持股數</th><th>未實現損益</th><th>R 值</th><th>操作</th></tr>' +
+      rows +
+    '</table>';
 }
 
-function closePosition(btn) {
-  if (!confirm('確定平倉該股票所有部位？')) return;
+// ── 局部平倉 ─────────────────────────────────────────────────
+function closePartial(btn) {
+  var inputId   = btn.getAttribute('data-inputid');
+  var maxShares = parseInt(btn.getAttribute('data-maxshares')) || 0;
+  var shares    = parseInt(document.getElementById(inputId).value);
+
+  if (!shares || shares <= 0) {
+    toast('請在左側輸入框填入要減倉的股數', true);
+    return;
+  }
+  if (shares > maxShares) {
+    toast('減倉股數不能超過持有股數（' + maxShares + '）', true);
+    return;
+  }
+
+  var label = shares >= maxShares ? '全部平倉' : '減倉 ' + shares + ' 股';
+  if (!confirm('確定' + label + '？')) return;
+
   var ids   = JSON.parse(decodeURIComponent(btn.getAttribute('data-ids')));
   var price = parseFloat(btn.getAttribute('data-price'));
-  if (!ids || ids.length === 0) { toast('找不到持倉 ID', true); return; }
   btn.disabled = true;
   btn.textContent = '處理中';
-  post('/api/close-position', { position_ids: ids, price: price }).then(function(r) {
-    if (r.ok) { toast('平倉成功'); loadData(); }
-    else { toast('失敗：' + (r.error || '未知錯誤'), true); btn.disabled = false; btn.textContent = '平倉'; }
-  }).catch(function(e) {
-    toast('網路錯誤：' + e.message, true);
-    btn.disabled = false; btn.textContent = '平倉';
-  });
+
+  post('/api/close-position', { position_ids: ids, price: price, partial_shares: shares })
+    .then(function(r) {
+      if (r.ok) { toast(label + ' 成功'); loadData(); }
+      else {
+        toast('失敗：' + (r.error || '未知錯誤'), true);
+        btn.disabled = false; btn.textContent = '減倉';
+      }
+    })
+    .catch(function(e) {
+      toast('網路錯誤：' + e.message, true);
+      btn.disabled = false; btn.textContent = '減倉';
+    });
+}
+
+// ── 全部平倉 ─────────────────────────────────────────────────
+function closePosition(btn) {
+  if (!confirm('確定全部平倉？')) return;
+  var ids   = JSON.parse(decodeURIComponent(btn.getAttribute('data-ids')));
+  var price = parseFloat(btn.getAttribute('data-price'));
+  btn.disabled = true;
+  btn.textContent = '處理中';
+
+  post('/api/close-position', { position_ids: ids, price: price })
+    .then(function(r) {
+      if (r.ok) { toast('全部平倉成功'); loadData(); }
+      else {
+        toast('失敗：' + (r.error || '未知錯誤'), true);
+        btn.disabled = false; btn.textContent = '全平';
+      }
+    })
+    .catch(function(e) {
+      toast('網路錯誤：' + e.message, true);
+      btn.disabled = false; btn.textContent = '全平';
+    });
 }
 
 function toggleAddForm() {
@@ -369,63 +474,152 @@ function toggleAddForm() {
 
 function addPosition() {
   var ticker = document.getElementById('ap-ticker').value;
-  var price = document.getElementById('ap-price').value;
+  var price  = document.getElementById('ap-price').value;
   var shares = document.getElementById('ap-shares').value;
-  var atr = document.getElementById('ap-atr').value;
-  var mult = document.getElementById('ap-mult').value;
+  var atr    = document.getElementById('ap-atr').value;
+  var mult   = document.getElementById('ap-mult').value;
   if (!ticker || !price || !shares) { toast('請填入股票、價格、股數', true); return; }
-  post('/api/add-position', { ticker: ticker, entry_price: price, shares: shares, atr: atr || 15, atr_multiplier: mult || 3 }).then(function(r) {
-    if (r.ok) { toast('持倉新增成功'); loadData(); toggleAddForm(); }
-    else toast('失敗：' + r.error, true);
-  });
+  post('/api/add-position', { ticker: ticker, entry_price: price, shares: shares, atr: atr || 15, atr_multiplier: mult || 3 })
+    .then(function(r) {
+      if (r.ok) { toast('持倉新增成功'); loadData(); toggleAddForm(); }
+      else toast('失敗：' + r.error, true);
+    });
 }
 
 function loadWatchlist() {
   fetch('/api/watchlist').then(function(r) { return r.json(); }).then(function(list) {
     document.getElementById('watchlist-content').innerHTML = list.map(function(t) {
-      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2d3748"><span>' + t + '</span><button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2d3748"><span>' + tickerLabel(t) + '</span><button class="btn sm red" onclick="removeFromWatchlist(\'' + t + '\')">移除</button></div>';
     }).join('') || '清單為空';
   });
 }
 
+function addToWatchlist() {
+  var t = document.getElementById('wl-input').value.trim().toUpperCase();
+  if (!t) return;
+  post('/api/watchlist/add', { ticker: t }).then(function() {
+    loadWatchlist();
+    document.getElementById('wl-input').value = '';
+    toast(tickerLabel(t) + ' 已加入觀察清單');
+  });
+}
+
+function removeFromWatchlist(t) {
+  post('/api/watchlist/remove', { ticker: t }).then(function() {
+    loadWatchlist();
+    toast(tickerLabel(t) + ' 已移除');
+  });
+}
+
+function runScheduler() {
+  document.getElementById('scheduler-result').innerHTML = '<p style="color:#718096;margin-top:12px">執行中...</p>';
+  fetch('/api/run-scheduler', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
+    if (r.ok) {
+      document.getElementById('scheduler-result').innerHTML = '<div class="result-box"><span style="color:#718096">環境：</span><span style="font-weight:600">' + r.regime + '</span>&nbsp;&nbsp;<span style="color:#718096">MRS：</span><span style="font-weight:600">' + r.mrs + '</span></div>';
+      toast('宏觀濾網執行完成'); loadData();
+    } else {
+      document.getElementById('scheduler-result').innerHTML = '<div class="result-box bad">失敗：' + r.error + '</div>';
+    }
+  });
+}
+
+function runEV() {
+  var ticker = document.getElementById('ev-ticker').value || 'TEST';
+  var score  = document.getElementById('ev-score').value || 60;
+  document.getElementById('ev-result').innerHTML = '<p style="color:#718096;margin-top:12px">模擬中...</p>';
+  post('/api/ev-simulate', { ticker: ticker, score: score }).then(function(r) {
+    var vc = r.ev_total > 0.5 ? 'good' : 'bad';
+    document.getElementById('ev-result').innerHTML = '<div class="result-box"><span style="color:#718096">EV：</span><span class="' + vc + '" style="font-weight:600">' + Number(r.ev_total || 0).toFixed(2) + 'R</span>&nbsp;&nbsp;<span style="color:#718096">勝率：</span><span style="font-weight:600">' + (Number(r.win_rate || 0) * 100).toFixed(0) + '%</span><br><span style="color:#718096">結論：</span><span class="' + (r.entry_valid ? 'good' : 'bad') + '" style="font-weight:600">' + r.reason + '</span></div>';
+  });
+}
+
+function runBlackSwan() {
+  document.getElementById('bs-result').innerHTML = '<p style="color:#718096;margin-top:12px">檢查中...</p>';
+  fetch('/api/black-swan', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
+    var msg = r.triggered > 0 ? '<div class="result-box bad">觸發 ' + r.triggered + ' 個情境</div>' : '<div class="result-box" style="color:#68d391">無黑天鵝情境觸發</div>';
+    document.getElementById('bs-result').innerHTML = msg;
+  });
+}
+
+function runWF() {
+  document.getElementById('wf-result').innerHTML = '<p style="color:#718096;margin-top:12px">驗證中...</p>';
+  fetch('/api/walk-forward', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(r) {
+    if (r.recommended_weights) {
+      var w = r.recommended_weights;
+      document.getElementById('wf-result').innerHTML = '<div class="result-box"><span style="color:#718096">建議：</span><span style="font-weight:600">' + r.recommendation + '</span><br><span style="color:#718096">動能：</span><span style="font-weight:600">' + (w.momentum * 100).toFixed(0) + '%</span> <span style="color:#718096">籌碼：</span><span style="font-weight:600">' + (w.chip * 100).toFixed(0) + '%</span> <span style="color:#718096">基本面：</span><span style="font-weight:600">' + (w.fundamental * 100).toFixed(0) + '%</span></div>';
+    } else {
+      document.getElementById('wf-result').innerHTML = '<div class="result-box warn">資料不足，維持預設權重</div>';
+    }
+  });
+}
+
+function addEvent() {
+  var d      = document.getElementById('event-date').value;
+  var type   = document.getElementById('event-type').value;
+  var name   = document.getElementById('event-name').value;
+  var impact = document.getElementById('event-impact').value;
+  if (!d || !name) { toast('請填入日期與事件名稱', true); return; }
+  post('/api/add-event', { event_date: d, event_type: type, name: name, impact_level: impact })
+    .then(function(r) {
+      if (r.ok) { toast('事件新增成功'); document.getElementById('event-name').value = ''; }
+    });
+}
+
+function renderSignalsFull() {
+  var rows = (DATA.signals || []).map(function(s) {
+    var t = s.logged_at ? new Date(s.logged_at).toLocaleString('zh-TW') : '-';
+    return '<tr><td style="font-size:11px;color:#718096">' + t + '</td><td>' + (s.decision_type || '') + '</td><td>' + tickerLabel(s.ticker) + '</td><td>' + (s.signal_source || '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:#718096;text-align:center">無訊號</td></tr>';
+  document.getElementById('signals-full').innerHTML = '<table><tr><th>時間</th><th>類型</th><th>股票</th><th>來源</th></tr>' + rows + '</table>';
+}
+
+function setMode(mode) {
+  SETTINGS.mode = mode;
+  document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('mode-' + mode).classList.add('active');
+}
+
 function updateWVal() {
-  document.getElementById('w-mom-val').textContent = document.getElementById('w-mom').value + '%';
+  document.getElementById('w-mom-val').textContent  = document.getElementById('w-mom').value + '%';
   document.getElementById('w-chip-val').textContent = document.getElementById('w-chip').value + '%';
-  document.getElementById('w-fun-val').textContent = document.getElementById('w-fun').value + '%';
+  document.getElementById('w-fun-val').textContent  = document.getElementById('w-fun').value + '%';
 }
 
 function loadSettings() {
   fetch('/api/settings').then(function(r) { return r.json(); }).then(function(s) {
     SETTINGS = s;
-    document.getElementById('atr-mult').value = s.atr_mult;
-    document.getElementById('trail-pct').value = s.trail_pct;
+    document.getElementById('atr-mult').value    = s.atr_mult;
+    document.getElementById('trail-pct').value   = s.trail_pct;
     document.getElementById('score-thresh').value = s.score_threshold;
-    document.getElementById('w-mom').value = s.weights.momentum * 100;
-    document.getElementById('w-chip').value = s.weights.chip * 100;
-    document.getElementById('w-fun').value = s.weights.fundamental * 100;
-    document.getElementById('sel-universe').value = s.universe;
-    document.getElementById('sel-top-pct').value = s.top_pct;
+    if (s.weights) {
+      document.getElementById('w-mom').value  = (s.weights.momentum || 0.3) * 100;
+      document.getElementById('w-chip').value = (s.weights.chip || 0.25) * 100;
+      document.getElementById('w-fun').value  = (s.weights.fundamental || 0.25) * 100;
+    }
+    if (s.universe) document.getElementById('sel-universe').value = s.universe;
+    if (s.top_pct)  document.getElementById('sel-top-pct').value  = s.top_pct;
     updateWVal();
+    if (s.mode) setMode(s.mode);
   });
 }
 
 function saveSettings() {
   SETTINGS.weights = {
-    momentum: parseInt(document.getElementById('w-mom').value) / 100,
-    chip: parseInt(document.getElementById('w-chip').value) / 100,
+    momentum:    parseInt(document.getElementById('w-mom').value) / 100,
+    chip:        parseInt(document.getElementById('w-chip').value) / 100,
     fundamental: parseInt(document.getElementById('w-fun').value) / 100,
-    valuation: 0.2
+    valuation:   0.2
   };
-  SETTINGS.universe = document.getElementById('sel-universe').value;
-  SETTINGS.top_pct = parseInt(document.getElementById('sel-top-pct').value);
-  SETTINGS.atr_mult = parseFloat(document.getElementById('atr-mult').value);
-  SETTINGS.trail_pct = parseInt(document.getElementById('trail-pct').value);
+  SETTINGS.universe        = document.getElementById('sel-universe').value;
+  SETTINGS.top_pct         = parseInt(document.getElementById('sel-top-pct').value);
+  SETTINGS.atr_mult        = parseFloat(document.getElementById('atr-mult').value);
+  SETTINGS.trail_pct       = parseInt(document.getElementById('trail-pct').value);
   SETTINGS.score_threshold = parseInt(document.getElementById('score-thresh').value);
-  
   post('/api/settings/save', SETTINGS).then(function() { toast('設定已儲存'); loadData(); });
 }
 
 loadData();
+setInterval(loadData, 60000);
 </script>
 </body>
 </html>
