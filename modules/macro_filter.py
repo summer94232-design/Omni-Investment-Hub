@@ -8,6 +8,12 @@
 #     資料來源：FinMind Y9999 TaiwanStockPrice
 # - [建構子] 新增可選的 fugle 與 finmind 參數（預設 None，保持向下相容）
 # - INSERT 語句擴充對應新欄位，ON CONFLICT 同步更新
+# ───────────────────────────────────────────────────────────────────────────────
+# Bug 修正（v3.1）：
+# - [BUG 4]  INSERT market_regime 補上 fed_funds_rate / us_10y_yield / us_2y_yield
+# - [BUG 9]  _fetch_basis_data() 使用 get_futures_quote('TXF') 取期貨報價，
+#            而非 get_quote()（股票端點），避免實盤環境 404
+# - [BUG 11] 基差 Redis key 改用 rk.key_market_basis_latest() 統一管理
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import json
@@ -57,39 +63,29 @@ REGIME_CONFIG = {
 }
 
 # ── [v3] Fugle 台指期近月合約代碼 ─────────────────────────────────────────────
-# Fugle MarketData API 的期貨代碼格式：TXF1（近月）或 TXF（連續月）
-FUGLE_TX_TICKER   = "TXF"     # 台指期連續月（近月合約）
-FUGLE_TWII_TICKER = "TWA00"   # 加權指數（Fugle 代碼）
+FUGLE_TX_TICKER   = "TXF"     # 台指期連續月（期貨端點）
+FUGLE_TWII_TICKER = "TWA00"   # 加權指數（股票端點）
 
 
 class MacroFilter:
-    """模組⑥ 宏觀濾網：計算 MRS 分數並判斷市場環境
-
-    變更紀錄（v3）：
-    - [基差寫入] run() 自動取得台指期 TX 價格和加權指數收盤價，
-      計算 Normalized Basis 並寫入 market_regime 表，
-      讓 BasisFilter 的 DB fallback 路徑能拿到資料
-    - [成交量寫入] run() 自動取得大盤日成交量（FinMind Y9999），
-      讓 BlackSwan._check_volume_ratio() 的主路徑能正常運作
-    - [建構子] 新增可選 fugle / finmind 參數，不傳入時優雅降級
-    """
+    """模組⑥ 宏觀濾網：計算 MRS 分數並判斷市場環境"""
 
     def __init__(
         self,
         hub: DataHub,
         fred: FredAPI,
-        fugle=None,    # 可選：FugleAPI 實例（取即時期貨報價）
-        finmind=None,  # 可選：FinMindAPI 實例（取歷史成交量、加權指數）
-        watchlist: Optional[list[str]] = None,  # 觀察清單（除息估算用）
+        fugle=None,
+        finmind=None,
+        watchlist: Optional[list[str]] = None,
     ):
-        self.hub      = hub
-        self.fred     = fred
-        self.fugle    = fugle
-        self.finmind  = finmind
+        self.hub       = hub
+        self.fred      = fred
+        self.fugle     = fugle
+        self.finmind   = finmind
         self.watchlist = watchlist or ['2330', '2317', '2454', '2303', '2382']
 
     # =========================================================================
-    # MRS 計算（不變）
+    # MRS 計算
     # =========================================================================
 
     def _calc_mrs(self, indicators: dict) -> float:
@@ -128,28 +124,15 @@ class MacroFilter:
         else:                                    return 'BEAR_TREND'
 
     # =========================================================================
-    # [v3 新增] 台指期基差資料取得
+    # [v3] 台指期基差資料取得
     # =========================================================================
 
-    async def _fetch_basis_data(
-        self,
-        trade_date: date,
-    ) -> dict:
+    async def _fetch_basis_data(self, trade_date: date) -> dict:
         """
-        取得台指期基差所需的三個數值：
-            tx_futures_price    : 台指期近月收盤價
-            tsec_index_price    : 加權指數收盤價
-            dividend_adjustment : 預估除息點數
+        取得台指期基差所需資料。
 
-        優先級：
-            Fugle 即時報價 → FinMind 歷史收盤 → 回傳 None（跳過寫入）
-
-        回傳：
-            {
-                'tx_futures_price':    float or None,
-                'tsec_index_price':    float or None,
-                'dividend_adjustment': float,
-            }
+        [BUG 9 修正] 台指期報價改用 get_futures_quote(FUGLE_TX_TICKER)，
+        不再使用 get_quote()（股票端點），避免實盤環境 404。
         """
         result = {
             'tx_futures_price':    None,
@@ -157,10 +140,10 @@ class MacroFilter:
             'dividend_adjustment': 0.0,
         }
 
-        # ── ① 嘗試從 Fugle 取即時報價 ──────────────────────────────────
         if self.fugle:
             try:
-                futures_quote = await self.fugle.get_quote(FUGLE_TX_TICKER)
+                # [BUG 9 修正] 期貨用 get_futures_quote，加權指數仍用 get_quote
+                futures_quote = await self.fugle.get_futures_quote(FUGLE_TX_TICKER)
                 spot_quote    = await self.fugle.get_quote(FUGLE_TWII_TICKER)
 
                 if futures_quote:
@@ -186,10 +169,9 @@ class MacroFilter:
             except Exception as e:
                 logger.warning("Fugle 基差資料取得失敗，改用 FinMind fallback：%s", e)
 
-        # ── ② FinMind fallback：取歷史收盤（Fugle 失敗或未配置時）─────
         if result['tsec_index_price'] is None and self.finmind:
             try:
-                start_str = str(trade_date - timedelta(days=5))
+                start_str  = str(trade_date - timedelta(days=5))
                 tsec_close = await self.finmind.get_twii_price(start_date=start_str)
                 if tsec_close:
                     result['tsec_index_price'] = tsec_close
@@ -197,105 +179,77 @@ class MacroFilter:
             except Exception as e:
                 logger.warning("FinMind 加權指數收盤取得失敗：%s", e)
 
-        # ── ③ 台指期價格：若 Fugle 沒拿到，用 tsec_index_price 代入（基差設為 0）──
-        #   說明：收盤後 Fugle 期貨行情可能不可用，用現貨價代入
-        #   代入後 basis = 0，不觸發任何過濾（保守處理）
         if result['tx_futures_price'] is None and result['tsec_index_price'] is not None:
             result['tx_futures_price'] = result['tsec_index_price']
             logger.info("台指期價格 fallback 使用加權指數價格（基差設為 0）")
 
-        # ── ④ 除息點數估算 ─────────────────────────────────────────────
-        if self.finmind and result['tsec_index_price']:
+        # 除息點數估算
+        if self.finmind and self.watchlist:
             try:
-                div_points = await self.finmind.get_upcoming_dividends(
-                    watchlist=self.watchlist,
-                    reference_date=trade_date,
-                    days_ahead=30,
+                div_adj = await self.finmind.get_upcoming_dividends(
+                    self.watchlist, trade_date
                 )
-                result['dividend_adjustment'] = div_points
+                result['dividend_adjustment'] = div_adj or 0.0
             except Exception as e:
-                logger.warning("除息點數估算失敗（使用 0）：%s", e)
+                logger.debug("除息點數取得失敗（使用 0）：%s", e)
 
         return result
 
     # =========================================================================
-    # [v3 新增] 大盤成交量取得
+    # [v3] 大盤成交量
     # =========================================================================
 
     async def _fetch_market_volume(self, trade_date: date) -> Optional[int]:
-        """
-        取得大盤日成交量（元），寫入 market_regime.market_volume。
-
-        資料來源：FinMind Y9999 TaiwanStockPrice
-        無 FinMind 實例時回傳 None（跳過寫入）
-
-        成交量說明：
-            FinMind Y9999 的 Trading_Volume 欄位為大盤當日成交量（元）
-            BlackSwan._check_volume_ratio() 用 5MA/20MA 比較，單位一致即可
-        """
         if not self.finmind:
-            logger.debug("無 FinMind 實例，跳過大盤成交量取得")
             return None
-
         try:
-            start_str  = str(trade_date - timedelta(days=5))
-            vol = await self.finmind.get_twii_volume(start_date=start_str)
-            if vol:
-                logger.info("大盤成交量：%d 元", vol)
-            return vol
+            start_str = str(trade_date - timedelta(days=5))
+            return await self.finmind.get_twii_volume(start_date=start_str)
         except Exception as e:
             logger.warning("大盤成交量取得失敗：%s", e)
             return None
 
     # =========================================================================
-    # run() 主函式（v3：擴充寫入欄位）
+    # 主執行方法
     # =========================================================================
 
     async def run(self, trade_date: Optional[date] = None) -> dict:
-        """
-        執行宏觀濾網，回傳當日環境快照。
-
-        v3 新增：
-        1. 取得台指期基差資料（tx_futures_price, tsec_index_price, dividend_adjustment）
-        2. 取得大盤成交量（market_volume）
-        3. 以上資料一併寫入 market_regime 表，並更新 Redis 快取
-        """
+        """執行宏觀濾網，計算 MRS / Regime，並寫入 DB 與 Redis"""
         if trade_date is None:
             trade_date = date.today()
 
         logger.info("宏觀濾網（v3）執行中，交易日：%s", trade_date)
 
-        # ── Step 1：取得 FRED 總經指標 ───────────────────────────────────
+        # Step 1：FRED 指標
         indicators = await self.fred.get_macro_snapshot()
         logger.info("FRED 指標：%s", indicators)
 
-        # ── Step 2：計算 MRS 與 Regime ───────────────────────────────────
+        # Step 2：MRS + Regime
         mrs    = self._calc_mrs(indicators)
         regime = self._classify_regime(mrs)
         config = REGIME_CONFIG[regime]
 
-        # ── Step 3：[v3] 取得基差資料 ────────────────────────────────────
+        # Step 3：基差
         basis_data = await self._fetch_basis_data(trade_date)
         tx_price   = basis_data['tx_futures_price']
         tsec_price = basis_data['tsec_index_price']
         div_adj    = basis_data['dividend_adjustment']
 
-        # 計算 Normalized Basis（供 log 顯示）
         if tx_price and tsec_price and tsec_price > 0:
             normalized_basis = (tx_price - (tsec_price - div_adj)) / tsec_price
             logger.info(
                 "基差計算：TX=%.0f TSEC=%.2f DIV=%.1f → Basis=%.4f (%.2f%%)",
                 tx_price, tsec_price, div_adj,
-                normalized_basis, normalized_basis * 100
+                normalized_basis, normalized_basis * 100,
             )
         else:
             normalized_basis = None
             logger.info("基差資料不足，跳過基差計算")
 
-        # ── Step 4：[v3] 取得大盤成交量 ──────────────────────────────────
+        # Step 4：大盤成交量
         market_volume = await self._fetch_market_volume(trade_date)
 
-        # ── Step 5：組裝回傳結果 ─────────────────────────────────────────
+        # Step 5：回傳結果
         result = {
             'trade_date':         trade_date,
             'regime':             regime,
@@ -308,7 +262,6 @@ class MacroFilter:
             'fed_funds_rate':     indicators.get('fed_funds_rate'),
             'us_10y_yield':       indicators.get('us_10y_yield'),
             'us_2y_yield':        indicators.get('us_2y_yield'),
-            # [v3 新增]
             'tx_futures_price':   tx_price,
             'tsec_index_price':   tsec_price,
             'dividend_adjustment': div_adj,
@@ -316,7 +269,10 @@ class MacroFilter:
             'market_volume':      market_volume,
         }
 
-        # ── Step 6：寫入 PostgreSQL（v3：擴充欄位）──────────────────────
+        # Step 6：寫入 PostgreSQL
+        # [BUG 4 修正] INSERT 補上 fed_funds_rate / us_10y_yield / us_2y_yield（$13,$14,$15）
+        # 原本只有 $1~$12，這三個利率欄位雖然已在 migration.sql PART 7 建好，
+        # 但 INSERT 未納入，導致歷史利率資料永遠為 NULL。
         await self.hub.execute("""
             INSERT INTO market_regime (
                 trade_date, regime, mrs_score,
@@ -324,20 +280,24 @@ class MacroFilter:
                 atr_multiplier, vcp_enabled,
                 vix_level,
                 tx_futures_price, tsec_index_price,
-                dividend_adjustment, market_volume
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                dividend_adjustment, market_volume,
+                fed_funds_rate, us_10y_yield, us_2y_yield
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             ON CONFLICT (trade_date) DO UPDATE SET
-                regime             = EXCLUDED.regime,
-                mrs_score          = EXCLUDED.mrs_score,
-                max_exposure_limit = EXCLUDED.max_exposure_limit,
-                factor_weights     = EXCLUDED.factor_weights,
-                atr_multiplier     = EXCLUDED.atr_multiplier,
-                vcp_enabled        = EXCLUDED.vcp_enabled,
-                vix_level          = EXCLUDED.vix_level,
-                tx_futures_price   = EXCLUDED.tx_futures_price,
-                tsec_index_price   = EXCLUDED.tsec_index_price,
-                dividend_adjustment= EXCLUDED.dividend_adjustment,
-                market_volume      = EXCLUDED.market_volume
+                regime              = EXCLUDED.regime,
+                mrs_score           = EXCLUDED.mrs_score,
+                max_exposure_limit  = EXCLUDED.max_exposure_limit,
+                factor_weights      = EXCLUDED.factor_weights,
+                atr_multiplier      = EXCLUDED.atr_multiplier,
+                vcp_enabled         = EXCLUDED.vcp_enabled,
+                vix_level           = EXCLUDED.vix_level,
+                tx_futures_price    = EXCLUDED.tx_futures_price,
+                tsec_index_price    = EXCLUDED.tsec_index_price,
+                dividend_adjustment = EXCLUDED.dividend_adjustment,
+                market_volume       = EXCLUDED.market_volume,
+                fed_funds_rate      = EXCLUDED.fed_funds_rate,
+                us_10y_yield        = EXCLUDED.us_10y_yield,
+                us_2y_yield         = EXCLUDED.us_2y_yield
         """,
             trade_date,
             regime,
@@ -347,13 +307,16 @@ class MacroFilter:
             config['atr_multiplier'],
             config['vcp_enabled'],
             indicators.get('vix'),
-            tx_price,       # [v3] 可為 None，PostgreSQL NUMERIC 接受 NULL
-            tsec_price,     # [v3]
-            div_adj,        # [v3]
-            market_volume,  # [v3] 可為 None
+            tx_price,
+            tsec_price,
+            div_adj,
+            market_volume,
+            indicators.get('fed_funds_rate'),   # [BUG 4 修正] $13
+            indicators.get('us_10y_yield'),     # [BUG 4 修正] $14
+            indicators.get('us_2y_yield'),      # [BUG 4 修正] $15
         )
 
-        # ── Step 7：寫入 Redis 快取（擴充欄位）──────────────────────────
+        # Step 7：Redis 快取
         cache_payload = {
             'regime':              regime,
             'mrs_score':           round(mrs, 2),
@@ -365,30 +328,27 @@ class MacroFilter:
             'normalized_basis':    result['normalized_basis'],
             'market_volume':       market_volume,
         }
-
         await self.hub.cache.set(
             rk.key_market_regime_latest(),
             cache_payload,
             ttl=rk.TTL_24H,
         )
 
-        # [v3] 同時把基差寫入獨立的 basis cache key，供 BasisFilter 快速讀取
+        # [BUG 11 修正] 基差 Redis key 改用 rk.key_market_basis_latest() 統一管理
         if normalized_basis is not None:
-            from datahub import redis_keys as _rk
-            BASIS_CACHE_KEY = "market:basis:latest"
             await self.hub.cache.set(
-                BASIS_CACHE_KEY,
+                rk.key_market_basis_latest(),
                 {
                     'basis': result['normalized_basis'],
                     'tx':    tx_price,
                     'tsec':  tsec_price,
                     'div':   div_adj,
                 },
-                ttl=300,  # BasisFilter 的 TTL（5 分鐘）
+                ttl=rk.TTL_5MIN,
             )
             logger.info(
                 "基差 Cache 更新：Basis=%.4f (%.2f%%)",
-                normalized_basis, normalized_basis * 100
+                normalized_basis, normalized_basis * 100,
             )
 
         logger.info(

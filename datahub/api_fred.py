@@ -14,7 +14,7 @@ SERIES = {
     "us_2y_yield":    "DGS2",
     "vix":            "VIXCLS",
     "us_cpi_yoy":     "CPIAUCSL",
-    "us_pmi":         "MANEMP",
+    "us_pmi":         "MMPCI",        # [BUG 10 修正] 原 MANEMP（製造業就業人數）→ MMPCI（ISM PMI Composite）
     "us_gdp_growth":  "A191RL1Q225SBEA",
     "us_unemployment":"UNRATE",
 }

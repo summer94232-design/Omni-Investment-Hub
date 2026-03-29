@@ -38,3 +38,9 @@ def key_signal(ticker: str, date: str) -> str:
 
 def key_event_rules(date: str) -> str:
     return f"event:rules:{date}"
+
+# [BUG 11 修正] 新增 market:basis:latest 的統一管理函式
+# 原本 selection_engine.py:92 與 macro_filter.py:378 各自 hardcode 此字串
+def key_market_basis_latest() -> str:
+    """台指期基差快取 Key（TTL=300s，供 BasisFilter 快速讀取）"""
+    return "market:basis:latest"

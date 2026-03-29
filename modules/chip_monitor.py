@@ -1,6 +1,6 @@
 # modules/chip_monitor.py
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 import pandas as pd
 from datahub.data_hub import DataHub
@@ -23,6 +23,46 @@ class ChipMonitor:
             return None
         return max(min_val, min(max_val, value))
 
+    def _calc_volume_ratio_5d20d(self, price_df: pd.DataFrame) -> Optional[float]:
+        """
+        計算個股 5 日均量 / 20 日均量比率。
+
+        [BUG 5 修正] 原本 _calc_crs() 完全未計算此值，
+        導致 volume_ratio_5d20d 永遠為 NULL，
+        進而使 LIQUIDITY_VOLUME 黑天鵝情境失效。
+
+        Args:
+            price_df: 包含 volume 欄位的 OHLCV DataFrame，按日期升序排列
+
+        Returns:
+            5MA / 20MA 比率（保留 3 位小數），資料不足時回傳 None
+        """
+        if price_df is None or price_df.empty:
+            return None
+
+        vol_col = None
+        for c in ['Trading_Volume', 'volume', 'Volume']:
+            if c in price_df.columns:
+                vol_col = c
+                break
+
+        if vol_col is None:
+            logger.debug("price_df 無成交量欄位，無法計算 volume_ratio_5d20d")
+            return None
+
+        volumes = price_df[vol_col].dropna().astype(float).tolist()
+        if len(volumes) < 20:
+            return None
+
+        ma5  = sum(volumes[-5:])  / 5
+        ma20 = sum(volumes[-20:]) / 20
+
+        if ma20 <= 0:
+            return None
+
+        ratio = round(ma5 / ma20, 3)
+        return ratio
+
     def _calc_crs(self, inst: pd.DataFrame, margin: pd.DataFrame) -> dict:
         result = {
             'crs_layer1': 50.0,
@@ -34,6 +74,7 @@ class ChipMonitor:
             'three_way_resonance': False,
             'margin_loan_change_pct': None,
             'sr_ratio': None,
+            'volume_ratio_5d20d': None,   # [BUG 5 修正] 初始化欄位
             'alerts': [],
         }
         alerts = []
@@ -53,16 +94,16 @@ class ChipMonitor:
                 if '外資' in name or 'Foreign' in name.title():
                     fini_buy = net
                     result['fini_net_buy_bn'] = round(self._clamp(net, -999.99, 999.99), 2)
-                    if net > 5:   l1 += 20
-                    elif net > 0: l1 += 10
+                    if net > 5:    l1 += 20
+                    elif net > 0:  l1 += 10
                     elif net < -5: l1 -= 20
                     else:          l1 -= 5
 
                 elif '投信' in name:
                     it_buy = net
                     result['it_net_buy_bn'] = round(self._clamp(net, -999.99, 999.99), 2)
-                    if net > 1:   l1 += 15
-                    elif net > 0: l1 += 5
+                    if net > 1:    l1 += 15
+                    elif net > 0:  l1 += 5
                     elif net < -1: l1 -= 10
 
                 elif '自營' in name:
@@ -110,7 +151,7 @@ class ChipMonitor:
                     result['margin_loan_change_pct'] = round(
                         self._clamp(margin_chg, -99.9999, 99.9999), 4
                     )
-                    if margin_chg > 0.05:   l2 -= 10
+                    if margin_chg > 0.05:    l2 -= 10
                     elif margin_chg < -0.05: l2 += 5
 
         result['crs_layer2'] = round(max(0, min(100, l2)), 2)
@@ -138,7 +179,17 @@ class ChipMonitor:
         inst_df   = await self.finmind.get_institutional_investors(ticker, start_date)
         margin_df = await self.finmind.get_margin_trading(ticker, start_date)
 
+        # [BUG 5 修正] 取得個股歷史成交量資料，用於計算 volume_ratio_5d20d
+        price_start = str(trade_date - timedelta(days=35))
+        price_df = await self.finmind.get_stock_price(ticker, price_start)
+
         crs = self._calc_crs(inst_df, margin_df)
+
+        # [BUG 5 修正] 計算 volume_ratio_5d20d 並存入 crs dict
+        volume_ratio = self._calc_volume_ratio_5d20d(price_df)
+        crs['volume_ratio_5d20d'] = volume_ratio
+        if volume_ratio is not None:
+            logger.debug("volume_ratio_5d20d=%s for %s", volume_ratio, ticker)
 
         await self.hub.execute("""
             INSERT INTO chip_monitor (
@@ -147,8 +198,9 @@ class ChipMonitor:
                 three_way_resonance,
                 margin_loan_change_pct, sr_ratio,
                 crs_layer1, crs_layer2, crs_layer3, crs_total,
-                alerts
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                alerts,
+                volume_ratio_5d20d
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (trade_date, ticker) DO UPDATE SET
                 fini_net_buy_bn        = EXCLUDED.fini_net_buy_bn,
                 it_net_buy_bn          = EXCLUDED.it_net_buy_bn,
@@ -159,8 +211,10 @@ class ChipMonitor:
                 crs_layer2             = EXCLUDED.crs_layer2,
                 crs_layer3             = EXCLUDED.crs_layer3,
                 crs_total              = EXCLUDED.crs_total,
-                alerts                 = EXCLUDED.alerts
+                alerts                 = EXCLUDED.alerts,
+                volume_ratio_5d20d     = EXCLUDED.volume_ratio_5d20d
         """,
+        # [BUG 5 修正] 欄位清單末尾加入 volume_ratio_5d20d，VALUES 加入第 13 個參數
             trade_date, ticker,
             crs['fini_net_buy_bn'], crs['it_net_buy_bn'],
             crs['three_way_resonance'],
@@ -168,6 +222,7 @@ class ChipMonitor:
             crs['crs_layer1'], crs['crs_layer2'],
             crs['crs_layer3'], crs['crs_total'],
             crs['alerts'],
+            crs['volume_ratio_5d20d'],
         )
 
         await self.hub.cache.set(
@@ -176,5 +231,6 @@ class ChipMonitor:
             ttl=rk.TTL_1H,
         )
 
-        logger.info("籌碼監控完成：%s CRS=%.1f", ticker, crs['crs_total'])
+        logger.info("籌碼監控完成：%s CRS=%.1f vol_ratio=%s",
+                    ticker, crs['crs_total'], crs['volume_ratio_5d20d'])
         return {**crs, 'ticker': ticker, 'trade_date': trade_date}

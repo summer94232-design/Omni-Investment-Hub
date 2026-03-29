@@ -1,6 +1,15 @@
 # modules/walk_forward.py
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 修正（v3.1）：
+# - [BUG 6] recommendation 補上 REJECT 分支（avg_r < 0 或 win_rate < 0.25）
+#           REJECT 時不將 suggested 權重寫入 Redis，維持現有權重
+# - [BUG 7] avg_oos_sharpe 改為實際計算（avg_r / std_r），不再硬編碼 None
+#           n_oos_windows 改為依資料期間動態計算，不再硬編碼 1
+# ═══════════════════════════════════════════════════════════════════════════════
+
 import json
 import logging
+import math
 from datetime import date
 from typing import Optional
 from datahub.data_hub import DataHub
@@ -9,6 +18,12 @@ from datahub import redis_keys as rk
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEIGHTS = {'momentum': 0.30, 'chip': 0.25, 'fundamental': 0.25, 'valuation': 0.20}
+
+# Walk-Forward 門檻
+DEPLOY_AVG_R    = 0.5
+DEPLOY_WIN_RATE = 0.40
+REJECT_AVG_R    = 0.0   # avg_r < 0 → REJECT
+REJECT_WIN_RATE = 0.25  # win_rate < 0.25 → REJECT
 
 
 class WalkForward:
@@ -22,7 +37,6 @@ class WalkForward:
         months: int = 12,
         trade_date: Optional[date] = None,
     ) -> list[dict]:
-        """取得歷史交易績效"""
         if trade_date is None:
             trade_date = date.today()
 
@@ -48,7 +62,6 @@ class WalkForward:
         return [dict(r) for r in rows]
 
     def _calc_factor_ic(self, records: list[dict], factor: str) -> float:
-        """計算因子 IC（資訊係數）"""
         valid = [r for r in records
                  if r.get(f'score_{factor}') is not None
                  and r.get('r_multiple') is not None]
@@ -60,55 +73,89 @@ class WalkForward:
 
         mean_s = sum(scores) / len(scores)
         mean_r = sum(returns) / len(returns)
-        cov    = sum((s - mean_s) * (r - mean_r) for s, r in zip(scores, returns))
-        std_s  = (sum((s - mean_s) ** 2 for s in scores) / len(scores)) ** 0.5
-        std_r  = (sum((r - mean_r) ** 2 for r in returns) / len(returns)) ** 0.5
+
+        cov = sum((s - mean_s) * (r - mean_r) for s, r in zip(scores, returns)) / len(valid)
+        std_s = math.sqrt(sum((s - mean_s) ** 2 for s in scores) / len(valid))
+        std_r = math.sqrt(sum((r - mean_r) ** 2 for r in returns) / len(valid))
 
         if std_s == 0 or std_r == 0:
             return 0.0
-        return round(cov / (len(valid) * std_s * std_r), 4)
+        return round(cov / (std_s * std_r), 4)
 
-    def _suggest_weights(self, ic_scores: dict) -> dict:
-        """依 IC 分數建議因子權重"""
-        total_ic = sum(max(v, 0.01) for v in ic_scores.values())
-        weights  = {k: round(max(v, 0.01) / total_ic, 3) for k, v in ic_scores.items()}
+    def _calc_oos_sharpe(self, r_multiples: list[float]) -> Optional[float]:
+        """
+        [BUG 7 修正] 計算 OOS Sharpe（avg_r / std_r）。
+        原本硬編碼為 None。
+        """
+        if len(r_multiples) < 2:
+            return None
+        avg_r = sum(r_multiples) / len(r_multiples)
+        std_r = math.sqrt(sum((r - avg_r) ** 2 for r in r_multiples) / len(r_multiples))
+        if std_r == 0:
+            return None
+        return round(avg_r / std_r, 4)
 
-        # 正規化
-        total   = sum(weights.values())
-        weights = {k: round(v / total, 3) for k, v in weights.items()}
-        return weights
+    def _calc_n_oos_windows(self, records: list[dict], oos_months: int = 3, step_months: int = 3) -> int:
+        """
+        [BUG 7 修正] 動態計算滾動視窗數量。
+        原本硬編碼為 1。
 
-    async def run(self, trade_date: Optional[date] = None) -> dict:
-        """執行 Walk-Forward 驗證"""
+        規則：總資料月數 / step_months，最少 1
+        """
+        if not records:
+            return 1
+        dates = [r['trade_date'] for r in records if r.get('trade_date')]
+        if len(dates) < 2:
+            return 1
+        min_d = min(dates)
+        max_d = max(dates)
+        # 換算為月數
+        total_months = (max_d.year - min_d.year) * 12 + (max_d.month - min_d.month)
+        n_windows = max(1, total_months // step_months)
+        return n_windows
+
+    async def run(
+        self,
+        trade_date: Optional[date] = None,
+    ) -> dict:
         if trade_date is None:
             trade_date = date.today()
 
-        logger.info("Walk-Forward 驗證開始")
         records = await self.get_historical_performance(trade_date=trade_date)
 
-        if len(records) < 20:
-            logger.warning("歷史資料不足（%d 筆），使用預設權重", len(records))
-            return {
-                'status':              'INSUFFICIENT_DATA',
-                'records_count':       len(records),
-                'recommended_weights': DEFAULT_WEIGHTS,
-                'recommendation':      'ADJUST',
-                'message':             '歷史資料不足，維持預設權重',
-            }
+        factors    = ['momentum', 'chip', 'fundamental', 'valuation']
+        ic_scores  = {f: self._calc_factor_ic(records, f) for f in factors}
 
-        # 計算各因子 IC
-        factors   = ['momentum', 'chip', 'fundamental', 'valuation']
-        ic_scores = {f: self._calc_factor_ic(records, f) for f in factors}
+        # 依 IC 比例計算建議權重（正 IC 才給權重）
+        total_ic = sum(max(v, 0) for v in ic_scores.values())
+        if total_ic > 0:
+            suggested = {f: round(max(ic_scores[f], 0) / total_ic, 4) for f in factors}
+        else:
+            suggested = DEFAULT_WEIGHTS.copy()
 
-        # 建議權重
-        suggested = self._suggest_weights(ic_scores)
-
-        # 績效統計
+        # ── 績效統計 ─────────────────────────────────────────────────────────
         trades_with_r = [r for r in records if r.get('r_multiple') is not None]
-        avg_r    = sum(float(r['r_multiple']) for r in trades_with_r) / max(len(trades_with_r), 1)
-        win_rate = len([r for r in trades_with_r if float(r['r_multiple']) > 0]) / max(len(trades_with_r), 1)
+        r_multiples   = [float(r['r_multiple']) for r in trades_with_r]
 
-        recommendation = 'DEPLOY' if avg_r > 0.5 and win_rate > 0.40 else 'ADJUST'
+        avg_r    = sum(r_multiples) / max(len(r_multiples), 1)
+        win_rate = len([r for r in r_multiples if r > 0]) / max(len(r_multiples), 1)
+
+        # [BUG 6 修正] 補上 REJECT 分支，原本只有 DEPLOY / ADJUST 兩種結論
+        if avg_r > DEPLOY_AVG_R and win_rate > DEPLOY_WIN_RATE:
+            recommendation = 'DEPLOY'
+        elif avg_r < REJECT_AVG_R or win_rate < REJECT_WIN_RATE:
+            recommendation = 'REJECT'
+        else:
+            recommendation = 'ADJUST'
+
+        # [BUG 7 修正] 動態計算 avg_oos_sharpe 和 n_oos_windows
+        avg_oos_sharpe = self._calc_oos_sharpe(r_multiples)
+        n_oos_windows  = self._calc_n_oos_windows(records)
+
+        logger.info(
+            "Walk-Forward 績效：avg_r=%.3f win_rate=%.3f sharpe=%s n_windows=%d → %s",
+            avg_r, win_rate, avg_oos_sharpe, n_oos_windows, recommendation,
+        )
 
         # 寫入 DB
         await self.hub.execute("""
@@ -125,8 +172,8 @@ class WalkForward:
             date(trade_date.year - 1, trade_date.month, trade_date.day),
             trade_date,
             12, 3, 3,
-            1,
-            None,
+            n_oos_windows,       # [BUG 7 修正] 動態計算，不再硬編碼 1
+            avg_oos_sharpe,      # [BUG 7 修正] 實際計算，不再硬編碼 None
             round(win_rate, 4),
             json.dumps({f: {'ic': ic_scores[f]} for f in factors}),
             recommendation,
@@ -135,14 +182,19 @@ class WalkForward:
             f"Walk-Forward 驗證 {trade_date}，{len(records)} 筆資料",
         )
 
-        # [BUG FIX] 原本 ttl=0 代表永不過期，Redis key 不會自動清除。
-        # 改為 TTL_24H（24小時），確保每次排程執行後快取能正常更新。
-        # 同時改用 redis_keys 統一管理 key 名稱，避免各模組拼字不一致。
-        await self.hub.cache.set(
-            rk.key_wf_weights_current(),
-            suggested,
-            ttl=rk.TTL_24H,
-        )
+        # [BUG 6 修正] REJECT 時不寫入 Redis，維持現有因子權重
+        if recommendation != 'REJECT':
+            await self.hub.cache.set(
+                rk.key_wf_weights_current(),
+                suggested,
+                ttl=rk.TTL_24H,
+            )
+            logger.info("Walk-Forward 權重已更新至 Redis：%s", suggested)
+        else:
+            logger.warning(
+                "Walk-Forward 結論為 REJECT（avg_r=%.3f win_rate=%.3f），不更新 Redis 權重",
+                avg_r, win_rate,
+            )
 
         logger.info("Walk-Forward 完成：建議=%s 權重=%s", recommendation, suggested)
         return {
@@ -153,4 +205,6 @@ class WalkForward:
             'recommendation':      recommendation,
             'avg_r':               round(avg_r, 3),
             'win_rate':            round(win_rate, 3),
+            'avg_oos_sharpe':      avg_oos_sharpe,
+            'n_oos_windows':       n_oos_windows,
         }

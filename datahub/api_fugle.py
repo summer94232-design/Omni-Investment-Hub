@@ -5,7 +5,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-FUGLE_BASE_URL = "https://api.fugle.tw/marketdata/v1.0"
+FUGLE_BASE_URL  = "https://api.fugle.tw/marketdata/v1.0"
 FUGLE_TRADE_URL = "https://api.fugle.tw/trading/v2.0"
 
 
@@ -19,21 +19,21 @@ class FugleAPI:
         account: str,
         paper_trading: bool = True,
     ):
-        self._api_key = api_key
-        self._trade_token = trade_token
-        self._account = account
+        self._api_key      = api_key
+        self._trade_token  = trade_token
+        self._account      = account
         self._paper_trading = paper_trading
-        self._client = httpx.AsyncClient(timeout=30.0)
+        self._client       = httpx.AsyncClient(timeout=30.0)
         logger.info("FugleAPI 初始化完成（paper_trading=%s）", paper_trading)
 
     async def close(self) -> None:
         await self._client.aclose()
 
     # -------------------------------------------------------------------------
-    # 行情
+    # 行情（股票）
     # -------------------------------------------------------------------------
     async def get_quote(self, ticker: str) -> Optional[dict]:
-        """取得即時報價"""
+        """取得即時股票報價"""
         try:
             resp = await self._client.get(
                 f"{FUGLE_BASE_URL}/stock/intraday/quote/{ticker}",
@@ -42,7 +42,34 @@ class FugleAPI:
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as e:
-            logger.error("Fugle 報價錯誤 ticker=%s: %s", ticker, e)
+            logger.error("Fugle 股票報價錯誤 ticker=%s: %s", ticker, e)
+            return None
+
+    # -------------------------------------------------------------------------
+    # 行情（期貨）— [BUG 9 修正] 新增期貨專用端點，不再誤用股票端點查 TXF
+    # -------------------------------------------------------------------------
+    async def get_futures_quote(self, ticker: str) -> Optional[dict]:
+        """取得即時期貨報價（使用 futopt 端點）
+
+        Args:
+            ticker: 期貨代碼，例如 "TXF"（台指期連續月）
+
+        Returns:
+            期貨報價 dict，或 None（失敗時）
+
+        Note:
+            台指期應使用此方法，而非 get_quote()。
+            get_quote() 使用 stock/intraday/quote 路徑，期貨代碼會回傳 404。
+        """
+        try:
+            resp = await self._client.get(
+                f"{FUGLE_BASE_URL}/futopt/intraday/quote/{ticker}",
+                headers={"X-API-KEY": self._api_key},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPError as e:
+            logger.error("Fugle 期貨報價錯誤 ticker=%s: %s", ticker, e)
             return None
 
     async def get_candles(
@@ -80,46 +107,40 @@ class FugleAPI:
     ) -> Optional[dict]:
         """下單（paper_trading=True 時只記錄不實際送出）"""
         payload = {
-            "stock_no":   ticker,
-            "buy_sell":   side,
-            "quantity":   quantity,
-            "price":      price,
+            "stock_no":  ticker,
+            "buy_sell":  side,
+            "quantity":  quantity,
+            "price":     price,
             "order_type": order_type,
-            "ap_code":    "Auto",
-            "price_flag": "Limit" if price else "Market",
-            "trade":      "Cash",
         }
 
         if self._paper_trading:
-            logger.info("[PAPER] 模擬下單 %s %s x%d @ %s", side, ticker, quantity, price)
-            return {"paper": True, "payload": payload}
+            logger.info("Paper Trading 模式，模擬下單：%s", payload)
+            return {"simulated": True, **payload}
 
         try:
             resp = await self._client.post(
-                f"{FUGLE_TRADE_URL}/orders",
-                headers={
-                    "X-API-KEY": self._trade_token,
-                    "Content-Type": "application/json",
-                },
+                f"{FUGLE_TRADE_URL}/order",
+                headers={"Authorization": f"Bearer {self._trade_token}"},
                 json=payload,
             )
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as e:
-            logger.error("Fugle 下單錯誤: %s", e)
+            logger.error("Fugle 下單錯誤 ticker=%s: %s", ticker, e)
             return None
 
-    async def get_balance(self) -> Optional[dict]:
-        """查詢帳戶餘額"""
+    async def get_positions(self) -> list[dict]:
+        """取得目前持倉"""
         if self._paper_trading:
-            return {"paper": True, "balance": 0}
+            return []
         try:
             resp = await self._client.get(
-                f"{FUGLE_TRADE_URL}/accounts/{self._account}/balance",
-                headers={"X-API-KEY": self._trade_token},
+                f"{FUGLE_TRADE_URL}/positions",
+                headers={"Authorization": f"Bearer {self._trade_token}"},
             )
             resp.raise_for_status()
-            return resp.json()
+            return resp.json().get("data", [])
         except httpx.HTTPError as e:
-            logger.error("Fugle 餘額查詢錯誤: %s", e)
-            return None
+            logger.error("Fugle 持倉查詢錯誤：%s", e)
+            return []

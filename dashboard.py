@@ -1,7 +1,17 @@
 # dashboard.py  ── v3 完整版
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 修正（v3.1）：
+# - [BUG 8]  handle_api_run_scheduler 改為呼叫 Scheduler.run_daily()，
+#            不再只執行 MacroFilter，Steps 1–7 全部執行
+# - [BUG 12] handle_index、handle_api_run_scheduler、handle_api_black_swan 等
+#            涉及 open() 的地方，全部改用 BASE_DIR 絕對路徑，
+#            避免在非專案根目錄啟動時拋出 FileNotFoundError
+# ═══════════════════════════════════════════════════════════════════════════════
+
 import asyncio
 import json
 import logging
+import os
 import yaml
 from datetime import date, datetime
 from decimal import Decimal
@@ -10,6 +20,9 @@ from datahub.data_hub import DataHub
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# [BUG 12 修正] 使用 __file__ 計算絕對路徑，確保從任何工作目錄啟動都能找到檔案
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def serialize(obj):
@@ -63,7 +76,6 @@ async def get_dashboard_data(hub):
         WHERE trade_date = (SELECT MAX(trade_date) FROM chip_monitor)
         ORDER BY crs_total DESC LIMIT 8
     """)
-    # 歸因分析：從最新 wf_results.notes 取得
     attribution_row = await hub.fetchrow("""
         SELECT notes FROM wf_results
         ORDER BY run_at DESC LIMIT 1
@@ -75,7 +87,6 @@ async def get_dashboard_data(hub):
         except Exception:
             pass
 
-    # 流動性偵測：最近一次黑天鵝 decision_log
     liquidity_signals = await hub.fetch("""
         SELECT logged_at, ticker, signal_source, notes
         FROM decision_log
@@ -84,7 +95,6 @@ async def get_dashboard_data(hub):
         ORDER BY logged_at DESC LIMIT 5
     """)
 
-    # 環境回饋門檻覆蓋（從 Redis 讀取，這裡改為查詢 wf_results 中 notes 欄位）
     regime_thresholds = {}
     if attribution_notes.get('regime_ev_feedback'):
         for reg, fb in attribution_notes['regime_ev_feedback'].items():
@@ -92,21 +102,23 @@ async def get_dashboard_data(hub):
                 regime_thresholds[reg] = fb.get('new_threshold', 65)
 
     return {
-        'regime':             dict(regime)    if regime    else {},
-        'health':             dict(health)    if health    else {},
-        'positions':          [dict(r) for r in positions],
-        'closed_positions':   [dict(r) for r in closed_positions],
-        'stocks':             [dict(r) for r in stocks],
-        'signals':            [dict(r) for r in signals],
-        'chips':              [dict(r) for r in chips],
-        'attribution':        attribution_notes,
-        'liquidity_signals':  [dict(r) for r in liquidity_signals],
-        'regime_thresholds':  regime_thresholds,
+        'regime':            dict(regime)  if regime  else {},
+        'health':            dict(health)  if health  else {},
+        'positions':         [dict(r) for r in positions],
+        'closed_positions':  [dict(r) for r in closed_positions],
+        'stocks':            [dict(r) for r in stocks],
+        'signals':           [dict(r) for r in signals],
+        'chips':             [dict(r) for r in chips],
+        'attribution':       attribution_notes,
+        'liquidity_signals': [dict(r) for r in liquidity_signals],
+        'regime_thresholds': regime_thresholds,
     }
 
 
 async def handle_index(request):
-    with open('static/index.html', encoding='utf-8') as f:
+    # [BUG 12 修正] 使用 BASE_DIR 絕對路徑，原本 open('static/index.html') 相對路徑
+    index_path = os.path.join(BASE_DIR, 'static', 'index.html')
+    with open(index_path, encoding='utf-8') as f:
         content = f.read()
     return web.Response(text=content, content_type='text/html')
 
@@ -205,7 +217,6 @@ async def handle_api_add_position(request):
         """, ticker, date.today(), entry, shares, atr, mult, stop, r)
         return web.Response(text='{"ok":true}', content_type='application/json')
     except Exception as e:
-        # ✅ 確保 except 一定回傳 JSON，不讓 aiohttp 產生 HTML 錯誤頁
         return web.Response(
             text=json.dumps({'ok': False, 'error': str(e)}, ensure_ascii=False),
             content_type='application/json',
@@ -254,21 +265,43 @@ async def handle_api_watchlist_remove(request):
 
 
 async def handle_api_run_scheduler(request):
+    """
+    [BUG 8 修正] 原本只執行 MacroFilter.run()，Steps 2–7 全部略過。
+    現在改為呼叫 Scheduler.run_daily()，完整執行所有 7 個步驟：
+      Step 1  MacroFilter
+      Step 2  ChipMonitor
+      Step 3  SelectionEngine（含基差過濾）
+      Step 4  ExitEngine
+      Step 5  SignalBus（訊號派送）
+      Step 6  Attribution
+      Step 7  Maintenance（月底分區）
+
+    [BUG 12 修正] config.yaml 路徑改用 BASE_DIR 絕對路徑
+    """
     hub = request.app['hub']
     try:
-        with open('config.yaml', encoding='utf-8') as f:
-            cfg = yaml.safe_load(f)
-        from datahub.api_fred import FredAPI
-        from modules.macro_filter import MacroFilter
-        fred   = FredAPI(cfg['fred']['api_key'])
-        macro  = MacroFilter(hub, fred)
-        result = await macro.run()
-        await fred.close()
+        # [BUG 12 修正] 絕對路徑讀取 config.yaml
+        config_path = os.path.join(BASE_DIR, 'config.yaml')
+
+        from modules.scheduler import Scheduler
+        sched = Scheduler(config_path)
+        await sched.connect()
+        try:
+            result = await sched.run_daily()
+        finally:
+            await sched.close()
+
         return web.Response(
-            text=json.dumps({'ok': True, 'regime': result['regime'], 'mrs': result['mrs_score']}),
+            text=json.dumps({
+                'ok':    True,
+                'regime': result.get('steps', {}).get('macro', {}).get('regime', ''),
+                'mrs':    result.get('steps', {}).get('macro', {}).get('mrs', 0),
+                'steps':  result.get('steps', {}),
+            }, default=serialize, ensure_ascii=False),
             content_type='application/json'
         )
     except Exception as e:
+        logger.exception('handle_api_run_scheduler 失敗')
         return web.Response(
             text=json.dumps({'ok': False, 'error': str(e)}),
             content_type='application/json'
@@ -290,7 +323,9 @@ async def handle_api_ev_simulate(request):
 async def handle_api_black_swan(request):
     hub = request.app['hub']
     try:
-        with open('config.yaml', encoding='utf-8') as f:
+        # [BUG 12 修正] 絕對路徑讀取 config.yaml
+        config_path = os.path.join(BASE_DIR, 'config.yaml')
+        with open(config_path, encoding='utf-8') as f:
             cfg = yaml.safe_load(f)
         from datahub.api_telegram import TelegramBot
         from modules.black_swan import BlackSwan
@@ -327,7 +362,7 @@ async def handle_api_walk_forward(request):
 
 
 async def handle_api_attribution(request):
-    """v3 新增：完整歸因分析"""
+    """v3：完整歸因分析"""
     hub = request.app['hub']
     try:
         from modules.attribution import Attribution
@@ -346,7 +381,7 @@ async def handle_api_attribution(request):
 
 
 async def handle_api_reset_regime_threshold(request):
-    """v3 新增：重置環境回饋門檻覆蓋值"""
+    """v3：重置環境回饋門檻覆蓋值"""
     hub  = request.app['hub']
     body = await request.json()
     regime = body.get('regime', '')
@@ -360,7 +395,9 @@ async def handle_api_reset_regime_threshold(request):
 
 
 async def create_app():
-    hub = DataHub('config.yaml')
+    # [BUG 12 修正] 絕對路徑讀取 config.yaml
+    config_path = os.path.join(BASE_DIR, 'config.yaml')
+    hub = DataHub(config_path)
     await hub.connect()
 
     app = web.Application()
@@ -372,23 +409,23 @@ async def create_app():
         'trail_pct': 15, 'score_threshold': 60, 'ev_threshold': 0.5,
     }
 
-    app.router.add_get('/',                             handle_index)
-    app.router.add_get('/api/data',                     handle_api_data)
-    app.router.add_get('/api/settings',                 handle_api_settings)
-    app.router.add_get('/api/watchlist',                handle_api_watchlist)
-    app.router.add_get('/api/attribution',              handle_api_attribution)
-    app.router.add_post('/api/settings/save',           handle_api_settings_save)
-    app.router.add_post('/api/close-position',          handle_api_close_position)
-    app.router.add_post('/api/reduce-position',         handle_api_reduce_position)
-    app.router.add_post('/api/add-position',            handle_api_add_position)
-    app.router.add_post('/api/add-event',               handle_api_add_event)
-    app.router.add_post('/api/watchlist/add',           handle_api_watchlist_add)
-    app.router.add_post('/api/watchlist/remove',        handle_api_watchlist_remove)
-    app.router.add_post('/api/run-scheduler',           handle_api_run_scheduler)
-    app.router.add_post('/api/ev-simulate',             handle_api_ev_simulate)
-    app.router.add_post('/api/black-swan',              handle_api_black_swan)
-    app.router.add_post('/api/walk-forward',            handle_api_walk_forward)
-    app.router.add_post('/api/reset-regime-threshold',  handle_api_reset_regime_threshold)
+    app.router.add_get('/',                            handle_index)
+    app.router.add_get('/api/data',                    handle_api_data)
+    app.router.add_get('/api/settings',                handle_api_settings)
+    app.router.add_get('/api/watchlist',               handle_api_watchlist)
+    app.router.add_get('/api/attribution',             handle_api_attribution)
+    app.router.add_post('/api/settings/save',          handle_api_settings_save)
+    app.router.add_post('/api/close-position',         handle_api_close_position)
+    app.router.add_post('/api/reduce-position',        handle_api_reduce_position)
+    app.router.add_post('/api/add-position',           handle_api_add_position)
+    app.router.add_post('/api/add-event',              handle_api_add_event)
+    app.router.add_post('/api/watchlist/add',          handle_api_watchlist_add)
+    app.router.add_post('/api/watchlist/remove',       handle_api_watchlist_remove)
+    app.router.add_post('/api/run-scheduler',          handle_api_run_scheduler)
+    app.router.add_post('/api/ev-simulate',            handle_api_ev_simulate)
+    app.router.add_post('/api/black-swan',             handle_api_black_swan)
+    app.router.add_post('/api/walk-forward',           handle_api_walk_forward)
+    app.router.add_post('/api/reset-regime-threshold', handle_api_reset_regime_threshold)
 
     return app
 

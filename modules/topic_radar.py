@@ -99,8 +99,13 @@ class TopicRadar:
                         zscore_5d, zscore_20d, percentile_60d,
                         ma_5d, ma_20d, alert_type
                     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-                    ON CONFLICT (id, trade_date) DO NOTHING
+                    ON CONFLICT (trade_date, topic) DO NOTHING
                 """,
+                # [BUG 2 修正] ON CONFLICT (id, trade_date) → ON CONFLICT (trade_date, topic)
+                # 原本 id 是 SERIAL PRIMARY KEY，每次 INSERT 都是唯一值，
+                # (id, trade_date) 永遠不會衝突，導致同天同主題重複寫入。
+                # 改為 (trade_date, topic) 需配合已執行 schema_patch.sql 中的
+                # UNIQUE constraint: uq_topic_heat_date_topic
                     trade_date, topic, raw_count,
                     zscore_5d, zscore_20d, pct_60d,
                     ma_5d, ma_20d, alert_type,
