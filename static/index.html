@@ -148,7 +148,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="regime-content"><p style="color:#718096">載入中...</p></div>
     </div>
 
-    <!-- [v3 NEW] 台指期基差卡 -->
     <div class="card" id="card-basis">
       <div class="card-title">台指期基差（Basis Filter）</div>
       <div id="basis-content"><p style="color:#718096">載入中...</p></div>
@@ -159,7 +158,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="health-content"></div>
     </div>
 
-    <!-- [v3 NEW] 流動性警示卡 -->
     <div class="card" id="card-liquidity">
       <div class="card-title">流動性警示（Liquidity Monitor）</div>
       <div id="liquidity-content"><p style="color:#718096">載入中...</p></div>
@@ -192,7 +190,10 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
     <div class="card wide">
       <div class="card-title">
         目前持倉（Open Positions）
-        <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm" onclick="mergePositions()">⊕ 合併同股持倉</button>
+          <button class="btn sm green" onclick="toggleAddForm()">+ 新增持倉</button>
+        </div>
       </div>
       <div id="add-pos-form" style="display:none;background:#2d3748;padding:16px;border-radius:8px;margin-bottom:16px">
         <div class="form-row">
@@ -214,7 +215,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="positions-full"></div>
     </div>
 
-    <!-- [v3 NEW] 已平倉 Alpha 分析 -->
     <div class="card wide">
       <div class="card-title">近30日平倉 — 個股超額 Alpha（R − 同產業均R）</div>
       <div id="closed-alpha-content"><p style="color:#718096;font-size:12px">無近期平倉記錄</p></div>
@@ -234,7 +234,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
           <button class="btn sm" onclick="renderSelection()">套用</button>
         </div>
       </div>
-      <!-- [v3] 基差警告提示 -->
       <div id="basis-warning" style="display:none;background:#3d2109;border:1px solid #744210;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#f6ad55"></div>
       <div id="selection-content"></div>
     </div>
@@ -248,7 +247,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="watchlist-content"></div>
     </div>
 
-    <!-- [v3 NEW] 產業群聚 Beta 倍率說明 -->
     <div class="card">
       <div class="card-title">產業群聚加分（Sector Cluster Beta）</div>
       <div id="sector-cluster-content">
@@ -261,11 +259,10 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
   </div>
 </div>
 
-<!-- ===== 歸因分析頁（v3 NEW）===== -->
+<!-- ===== 歸因分析頁 ===== -->
 <div id="page-attribution" class="page">
   <div class="grid">
 
-    <!-- Alpha 拆解摘要 -->
     <div class="card wide">
       <div class="card-title">
         Alpha / Beta / SECTOR_BETA 分布
@@ -281,13 +278,11 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="alpha-source-content"><p style="color:#718096">載入中...</p></div>
     </div>
 
-    <!-- 產業超額 Alpha 排行 -->
     <div class="card">
       <div class="card-title">產業超額 Alpha 排行</div>
       <div id="sector-alpha-content"><p style="color:#718096;font-size:12px">無資料</p></div>
     </div>
 
-    <!-- 環境回饋門檻 -->
     <div class="card">
       <div class="card-title">
         環境回饋進場門檻（Regime EV Feedback）
@@ -296,13 +291,11 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="regime-feedback-content"><p style="color:#718096;font-size:12px">無覆蓋記錄</p></div>
     </div>
 
-    <!-- 個股超額 Alpha 明細 -->
     <div class="card wide">
       <div class="card-title">個股超額 Alpha 明細（individual_alpha = 個股R − 同產業均R）</div>
       <div id="per-trade-alpha-content"><p style="color:#718096;font-size:12px">無資料</p></div>
     </div>
 
-    <!-- 計畫外交易統計 -->
     <div class="card wide">
       <div class="card-title">計畫外交易統計（Unplanned Trade Penalty）</div>
       <div id="unplanned-content"><p style="color:#718096;font-size:12px">無資料</p></div>
@@ -344,7 +337,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="ev-result"></div>
     </div>
 
-    <!-- [v3 MODIFIED] 黑天鵝 — 顯示實際減倉結果 -->
     <div class="card">
       <div class="card-title">黑天鵝壓力測試（Black Swan + Liquidity）</div>
       <p style="font-size:12px;color:#718096;margin-bottom:8px">
@@ -410,7 +402,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <div id="mode-desc" style="margin-top:12px;font-size:12px;color:#718096"></div>
     </div>
 
-    <!-- [v3 MODIFIED] ATR 倍數 → Regime 動態對照表 -->
     <div class="card">
       <div class="card-title">Regime 動態 ATR 停損倍數</div>
       <p style="font-size:12px;color:#718096;margin-bottom:10px">各市場環境使用不同 S1 停損距離（v3）</p>
@@ -464,7 +455,6 @@ input:focus,select:focus{outline:none;border-color:#4299e1}
       <button class="btn" style="width:100%;margin-top:12px" onclick="saveSettings()">儲存設定</button>
     </div>
 
-    <!-- [v3 NEW] 環境回饋門檻覆蓋查看 -->
     <div class="card">
       <div class="card-title">
         環境回饋門檻覆蓋（Regime EV Feedback）
@@ -526,13 +516,13 @@ function showPage(name){
   if(name==='attribution'){ loadAttribution(); renderRegimeFeedback(); }
 }
 
-/* ── Toast ── */
+/* ── Toast（顯示 10 秒）── */
 function toast(msg,isErr){
   var t = document.getElementById('toast');
   t.textContent = msg;
   t.style.borderColor = isErr ? '#fc8181' : '#68d391';
   t.classList.add('show');
-  setTimeout(function(){ t.classList.remove('show'); }, 3000);
+  setTimeout(function(){ t.classList.remove('show'); }, 10000);
 }
 
 /* ── POST 工具 ── */
@@ -567,7 +557,6 @@ function renderOverview(){
   var reg = DATA.regime || {};
   var h   = DATA.health || {};
 
-  /* 宏觀環境 */
   var vixCls = (reg.vix_level||0)>25?'bad':(reg.vix_level||0)>18?'warn':'good';
   var expPct = h.gross_exposure_pct ? (h.gross_exposure_pct*100).toFixed(1) : '0.0';
   var expCls = h.gross_exposure_pct>0.8?'bad':h.gross_exposure_pct>0.5?'warn':'good';
@@ -577,10 +566,8 @@ function renderOverview(){
     '<div class="metric"><span class="label">VIX</span><span class="val '+vixCls+'">'+(reg.vix_level||'-')+'</span></div>'+
     '<div class="metric"><span class="label">曝險上限</span><span class="val neu">'+(reg.max_exposure_limit?(reg.max_exposure_limit*100).toFixed(0)+'%':'N/A')+'</span></div>';
 
-  /* [v3] 台指期基差卡 */
   renderBasisCard(reg);
 
-  /* 組合健康 */
   document.getElementById('health-content').innerHTML =
     '<div class="metric"><span class="label">NAV（組合淨值）</span><span class="val neu">'+Number(h.nav||0).toLocaleString()+' 元</span></div>'+
     '<div class="metric"><span class="label">曝險比例</span><span class="val '+expCls+'">'+expPct+'%</span></div>'+
@@ -588,7 +575,6 @@ function renderOverview(){
     '<div class="metric"><span class="label">熔斷狀態</span><span class="val '+(h.circuit_breaker_triggered?'bad':'good')+'">'+(h.circuit_breaker_triggered?'⚠ 觸發':'✓ 正常')+'</span></div>'+
     '<div class="metric"><span class="label">最大回撤</span><span class="val warn">'+(h.drawdown_from_peak?(h.drawdown_from_peak*100).toFixed(1)+'%':'N/A')+'</span></div>';
 
-  /* 持倉快照 */
   var pos = DATA.positions || [];
   if(!pos.length){
     document.getElementById('pos-preview').innerHTML = '<p style="color:#718096;font-size:12px">目前無持倉</p>';
@@ -606,7 +592,6 @@ function renderOverview(){
       '<table><tr><th>股票</th><th>狀態</th><th>R倍數</th><th>損益</th></tr>'+rows+'</table>';
   }
 
-  /* 籌碼監控 */
   var chips = DATA.chips || [];
   if(!chips.length){
     document.getElementById('chip-content').innerHTML = '<p style="color:#718096;font-size:12px">無籌碼資料</p>';
@@ -622,7 +607,6 @@ function renderOverview(){
       '<table><tr><th>股票</th><th>CRS 總分</th></tr>'+rows2+'</table>';
   }
 
-  /* 訊號日誌 */
   var sigs = (DATA.signals||[]).slice(0,5);
   if(!sigs.length){
     document.getElementById('sig-preview').innerHTML = '<p style="color:#718096;font-size:12px">無訊號記錄</p>';
@@ -639,11 +623,9 @@ function renderOverview(){
       '<table><tr><th>時間</th><th>類型</th><th>股票</th></tr>'+rows3+'</table>';
   }
 
-  /* 流動性警示 */
   renderLiquidityCard();
 }
 
-/* ── [v3] 台指期基差卡 ── */
 function renderBasisCard(reg){
   var tx   = parseFloat(reg.tx_futures_price  || 0);
   var tsec = parseFloat(reg.tsec_index_price  || 0);
@@ -672,11 +654,8 @@ function renderBasisCard(reg){
     '<div class="metric"><span class="label">進場過濾效果</span><span class="val '+(basis<-0.008?'warn':'good')+'">'+filterStatus+'</span></div>';
 }
 
-/* ── [v3] 流動性警示卡 ── */
 function renderLiquidityCard(){
   var liqSigs  = DATA.liquidity_signals || [];
-  var attr     = DATA.attribution || {};
-
   var basisPanic  = false;
   var volumeWarn  = false;
   var recentTrig  = liqSigs.length > 0;
@@ -687,7 +666,6 @@ function renderLiquidityCard(){
   });
 
   var html = '';
-
   html += '<div class="liq-indicator">'+
     '<div class="liq-dot '+(basisPanic?'bad':'ok')+'"></div>'+
     '<div style="flex:1">'+
@@ -738,6 +716,7 @@ function renderPositionsFull(){
       '<td style="color:#90cdf4;font-size:11px">'+atrMlt+'</td>'+
       '<td>'+
         '<button class="btn sm red" style="margin-right:4px" onclick="closePos(\''+p.id+'\','+p.entry_price+')">平倉</button>'+
+        '<button class="btn sm amber" onclick="reducePos(\''+p.id+'\','+p.current_shares+')">減倉</button>'+
       '</td>'+
       '</tr>';
   }).join('')||'<tr><td colspan="8" style="color:#718096;text-align:center">無持倉</td></tr>';
@@ -860,7 +839,7 @@ function renderSectorCluster(){
 }
 
 /* ══════════════════════════════════════════════
-   [v3] 歸因分析頁
+   歸因分析頁
 ══════════════════════════════════════════════ */
 function loadAttribution(){
   var days = document.getElementById('attr-days') ?
@@ -882,7 +861,7 @@ function loadAttribution(){
 
 function renderAlphaSource(d){
   if(!d || d.total_trades===0){
-    document.getElementById('alpha-source-content').innerHTML = '<p style="color:#718096">'+( d&&d.message||'無資料')+'</p>';
+    document.getElementById('alpha-source-content').innerHTML = '<p style="color:#718096">'+(d&&d.message||'無資料')+'</p>';
     return;
   }
   var ab = d.alpha_source_breakdown || {};
@@ -1210,6 +1189,58 @@ function closePos(id,price){
   if(!confirm('確認平倉此持倉？')) return;
   post('/api/close-position',{position_id:id,price:price}).then(function(r){
     if(r.ok){ toast('已平倉'); loadData(); }
+  });
+}
+
+/* ── [新增] 減倉 ── */
+function reducePos(id, currentShares){
+  var sharesStr = prompt(
+    '減倉股數（目前持有 ' + currentShares + ' 股）：\n輸入要賣出的股數',
+    Math.floor(currentShares / 2)
+  );
+  if(sharesStr === null) return;
+  var shares = parseInt(sharesStr);
+  if(isNaN(shares) || shares <= 0){ toast('請輸入有效股數', true); return; }
+  if(shares > currentShares){ toast('減倉股數不能超過持有股數（' + currentShares + '）', true); return; }
+
+  var priceStr = prompt('減倉價格（元）：');
+  if(priceStr === null) return;
+  var price = parseFloat(priceStr);
+  if(isNaN(price) || price <= 0){ toast('請輸入有效價格', true); return; }
+
+  if(!confirm('確認減倉 ' + shares + ' 股 @ ' + price + ' 元？')) return;
+
+  post('/api/reduce-position', {
+    position_id: id,
+    exit_shares: shares,
+    exit_price:  price
+  }).then(function(r){
+    if(r.ok){
+      toast('減倉完成：' + String(r.ticker||'').trim() + ' 賣出 ' + r.exit_shares + ' 股，實現損益 ' + Number(r.realized_pnl||0).toLocaleString() + ' 元');
+      loadData();
+    } else {
+      toast('減倉失敗：' + (r.error || '未知錯誤'), true);
+    }
+  });
+}
+
+/* ── [新增] 合併同股 ── */
+function mergePositions(){
+  if(!confirm('將所有相同股票代號的重複開倉合併為一筆（保留最早進場日，重新計算加權平均成本）。確認執行？')) return;
+  post('/api/merge-positions', {}).then(function(r){
+    if(r.ok){
+      if(r.merged === 0){
+        toast('目前沒有需要合併的重複持倉');
+      } else {
+        var detail = (r.detail||[]).map(function(d){
+          return d.ticker + '（合計 ' + d.total_shares + ' 股，均價 ' + d.new_avg_cost + '）';
+        }).join('、');
+        toast('已合併 ' + r.merged + ' 檔：' + detail);
+        loadData();
+      }
+    } else {
+      toast('合併失敗：' + (r.error || '未知錯誤'), true);
+    }
   });
 }
 

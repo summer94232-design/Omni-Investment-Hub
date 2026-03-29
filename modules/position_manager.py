@@ -1,8 +1,9 @@
 # modules/position_manager.py
 # ═══════════════════════════════════════════════════════════════════════════════
 # Bug 修正（v3.1）：
-# - [BUG 3] INSERT portfolio_health 補上 daily_pnl_pct（$13）
-#   schema_patch.sql Patch 2 已建好此欄位，但程式碼未同步寫入。
+# - [BUG 3]  INSERT portfolio_health 補上 daily_pnl_pct（$13）
+# - [BUG A]  drawdown_from_peak 和 daily_pnl_pct 從硬編碼 0.0 改為實際計算
+#            修正前熔斷機制永遠不會觸發，有實際資金風險
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import logging
@@ -52,9 +53,7 @@ class PositionManager:
             ORDER BY snapshot_date DESC LIMIT 1
         """)
 
-        cash   = float(row['cash_amount']) if row else 1_000_000.0
-        nav_db = float(row['nav'])         if row else 1_000_000.0
-
+        cash       = float(row['cash_amount']) if row else 1_000_000.0
         stock_value = sum(
             float(p.get('entry_price', 0)) * int(p.get('shares', 0))
             for p in positions
@@ -64,10 +63,10 @@ class PositionManager:
         gross_exposure_pct = stock_value / nav if nav > 0 else 0.0
 
         return {
-            'nav':                 round(nav, 2),
-            'cash_amount':         round(cash, 2),
-            'stock_market_value':  round(stock_value, 2),
-            'gross_exposure_pct':  round(gross_exposure_pct, 4),
+            'nav':                round(nav, 2),
+            'cash_amount':        round(cash, 2),
+            'stock_market_value': round(stock_value, 2),
+            'gross_exposure_pct': round(gross_exposure_pct, 4),
         }
 
     def calc_var_95(self, positions: list[dict], nav: float, confidence: float = 0.95) -> float:
@@ -118,7 +117,7 @@ class PositionManager:
             WHERE trade_date <= $1
             ORDER BY trade_date DESC LIMIT 1
         """, trade_date)
-        regime = regime_row['regime']    if regime_row else 'CHOPPY'
+        regime = regime_row['regime']         if regime_row else 'CHOPPY'
         mrs    = float(regime_row['mrs_score']) if regime_row else 50.0
 
         max_exposure   = EXPOSURE_LEVELS.get(regime, 0.40)
@@ -126,25 +125,45 @@ class PositionManager:
 
         var_95 = self.calc_var_95(positions, nav)
 
-        drawdown      = 0.0
-        daily_pnl_pct = 0.0
+        # ── [BUG A 修正] 計算真實回撤（原本硬編碼為 0.0）────────────────────
+        peak_row = await self.hub.fetchrow("""
+            SELECT MAX(nav) AS peak_nav FROM portfolio_health
+            WHERE snapshot_date >= CURRENT_DATE - INTERVAL '252 days'
+        """)
+        peak_nav = float(peak_row['peak_nav']) if peak_row and peak_row['peak_nav'] else nav
+        drawdown = max(0.0, (peak_nav - nav) / peak_nav) if peak_nav > 0 else 0.0
+
+        # ── [BUG A 修正] 計算真實單日損益（原本硬編碼為 0.0）───────────────
+        yesterday_row = await self.hub.fetchrow("""
+            SELECT nav FROM portfolio_health
+            WHERE snapshot_date < $1
+            ORDER BY snapshot_date DESC LIMIT 1
+        """, trade_date)
+        yesterday_nav = float(yesterday_row['nav']) if yesterday_row else nav
+        daily_pnl_pct = (nav - yesterday_nav) / yesterday_nav if yesterday_nav > 0 else 0.0
+
         circuit, circuit_reason = self.check_circuit_breaker(drawdown, daily_pnl_pct)
+
+        if circuit:
+            logger.warning(
+                "熔斷觸發：%s  drawdown=%.2f%%  daily_pnl=%.2f%%",
+                circuit_reason, drawdown * 100, daily_pnl_pct * 100,
+            )
 
         result = {
             **nav_data,
             'snapshot_date':             trade_date,
             'exposure_level':            exposure_level,
-            'drawdown_from_peak':        drawdown,
+            'drawdown_from_peak':        round(drawdown, 4),
             'portfolio_var_95':          var_95,
             'circuit_breaker_triggered': circuit,
             'circuit_breaker_reason':    circuit_reason,
             'regime_snapshot':           regime,
             'mrs_snapshot':              mrs,
-            'daily_pnl_pct':             daily_pnl_pct,
+            'daily_pnl_pct':             round(daily_pnl_pct, 4),
         }
 
         # [BUG 3 修正] INSERT 欄位清單末尾加入 daily_pnl_pct（$13）
-        # 原本只有 $1~$12，schema_patch.sql Patch 2 已建好此欄位但程式未寫入。
         await self.hub.execute("""
             INSERT INTO portfolio_health (
                 snapshot_date, nav, cash_amount, stock_market_value,
@@ -174,13 +193,13 @@ class PositionManager:
             nav_data['stock_market_value'],
             nav_data['gross_exposure_pct'],
             exposure_level,
-            drawdown,
+            round(drawdown, 4),
             var_95,
             circuit,
             circuit_reason,
             regime,
             mrs,
-            daily_pnl_pct,   # [BUG 3 修正] $13
+            round(daily_pnl_pct, 4),
         )
 
         await self.hub.cache.set(
@@ -190,8 +209,9 @@ class PositionManager:
         )
 
         logger.info(
-            "部位控管完成：NAV=%.0f 曝險=%.1f%% 熔斷=%s daily_pnl=%.2f%%",
-            nav, nav_data['gross_exposure_pct'] * 100, circuit, daily_pnl_pct * 100,
+            "部位控管完成：NAV=%.0f 曝險=%.1f%% 回撤=%.2f%% 熔斷=%s daily_pnl=%.2f%%",
+            nav, nav_data['gross_exposure_pct'] * 100,
+            drawdown * 100, circuit, daily_pnl_pct * 100,
         )
         return result
 
@@ -205,32 +225,32 @@ class PositionManager:
     ) -> dict:
         """部分出場"""
         row = await self.hub.fetchrow(
-            "SELECT ticker, shares, entry_price, atr FROM positions WHERE id=$1",
+            "SELECT ticker, current_shares, avg_cost, entry_price FROM positions WHERE id=$1",
             position_id,
         )
         if not row:
             raise ValueError(f"找不到部位 id={position_id}")
 
-        ticker        = row['ticker']
-        current_shares = int(row['shares'])
-        entry_price    = float(row['entry_price'])
+        ticker         = row['ticker']
+        current_shares = int(row['current_shares'])
+        cost_basis     = float(avg_cost or row['avg_cost'] or row['entry_price'])
 
         if exit_shares >= current_shares:
             await self.hub.execute("""
                 UPDATE positions SET is_open=FALSE, exit_date=$1, exit_price=$2,
-                exit_reason='PARTIAL_EXIT', state='CLOSED', shares=0
+                exit_reason='PARTIAL_EXIT', state='CLOSED', current_shares=0
                 WHERE id=$3
             """, date.today(), exit_price, position_id)
         else:
             new_shares = current_shares - exit_shares
             await self.hub.execute("""
-                UPDATE positions SET shares=$1 WHERE id=$2
+                UPDATE positions SET current_shares=$1 WHERE id=$2
             """, new_shares, position_id)
 
-        pnl = (exit_price - entry_price) * exit_shares
+        pnl = (exit_price - cost_basis) * exit_shares
         logger.info(
-            "部分出場：%s id=%d 出場%d股 @%.2f PnL=%.0f",
-            ticker, position_id, exit_shares, exit_price, pnl,
+            "部分出場：%s id=%d 出場%d股 @%.2f 成本%.2f PnL=%.0f",
+            ticker, position_id, exit_shares, exit_price, cost_basis, pnl,
         )
         return {
             'ticker':       ticker,

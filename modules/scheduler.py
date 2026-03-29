@@ -13,10 +13,17 @@
 #   Step 5  訊號篩選派送    SignalBus.emit_entry()
 #   Step 6  歸因分析        Attribution.analyze_closed_positions()
 #   月底     DB 分區維護    create_monthly_partitions()
+#
+# Bug 修正（v3.1）：
+# - [BUG B] __init__ config_path 預設值改用 __file__ 計算絕對路徑，
+#           避免從非根目錄直接執行 `python modules/scheduler.py` 時 FileNotFoundError
+# - [BUG D] run_daily() 開頭加入 self.bus is None 防護，
+#           避免呼叫方未呼叫 connect() 就執行排程時靜默失敗
 # =============================================================================
 
 import asyncio
 import logging
+import os
 import yaml
 from datetime import date
 from datahub.data_hub import DataHub
@@ -51,13 +58,21 @@ ENTRY_SCORE_THRESHOLD = 60.0
 class Scheduler:
     """每日自動化交易排程器（v3 完整版）"""
 
-    def __init__(self, config_path: str = 'config.yaml'):
+    def __init__(self, config_path: str = None):
+        # [BUG B 修正] 預設使用 scheduler.py 所在目錄的上一層（專案根目錄）
+        # 原本預設 'config.yaml' 相對路徑，從非根目錄執行會 FileNotFoundError
+        if config_path is None:
+            config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                '..', 'config.yaml'
+            )
+
         with open(config_path, encoding='utf-8') as f:
             self.cfg = yaml.safe_load(f)
 
-        self.hub     = DataHub(config_path)
-        self.fred    = FredAPI(self.cfg['fred']['api_key'])
-        self.finmind = FinMindAPI(self.cfg['finmind']['token'])
+        self.hub      = DataHub(config_path)
+        self.fred     = FredAPI(self.cfg['fred']['api_key'])
+        self.finmind  = FinMindAPI(self.cfg['finmind']['token'])
         self.telegram = TelegramBot(
             self.cfg['telegram']['bot_token'],
             self.cfg['telegram']['chat_id'],
@@ -72,7 +87,7 @@ class Scheduler:
             paper_trading=fugle_cfg.get('paper_trading', True),
         )
 
-        self.bus = None
+        self.bus = None  # connect() 後才初始化
 
     async def connect(self):
         await self.hub.connect()
@@ -91,6 +106,10 @@ class Scheduler:
     # =========================================================================
 
     async def run_daily(self, trade_date: date = None) -> dict:
+        # [BUG D 修正] 防護：確保 connect() 已被呼叫
+        if self.bus is None:
+            raise RuntimeError("請先呼叫 await sched.connect() 再執行 run_daily()")
+
         if trade_date is None:
             trade_date = date.today()
 
@@ -104,9 +123,9 @@ class Scheduler:
             macro = MacroFilter(
                 self.hub,
                 self.fred,
-                fugle=self.fugle,       # 取 Fugle 即時台指期報價
-                finmind=self.finmind,   # 取 FinMind 大盤成交量 + 加權指數
-                watchlist=WATCHLIST,    # 供除息點數估算
+                fugle=self.fugle,
+                finmind=self.finmind,
+                watchlist=WATCHLIST,
             )
             regime_result  = await macro.run(trade_date)
             current_regime = regime_result['regime']
@@ -176,8 +195,8 @@ class Scheduler:
         # ── Step 3b：產業群聚加分（Beta 差異化）─────────────────────────
         raw_signals = apply_sector_cluster_bonus(raw_signals, ENTRY_SCORE_THRESHOLD)
         results['steps']['selection'] = {
-            'status':    'OK',
-            'processed': len(raw_signals),
+            'status':       'OK',
+            'processed':    len(raw_signals),
             'basis_blocked': sum(
                 1 for r in raw_signals
                 if 'BASIS_HARD_BLOCK' in str(r.get('basis_filter_reason', ''))
@@ -228,7 +247,6 @@ class Scheduler:
             logger.warning('負向群聚出場檢查失敗：%s', e)
 
         # ── Step 5：訊號篩選與派送 ───────────────────────────────────────
-        # 取得本次 Regime 的進場門檻（可能被環境回饋自動提高）
         try:
             effective_threshold = await attribution.get_regime_score_threshold(
                 current_regime, default=ENTRY_SCORE_THRESHOLD
@@ -262,17 +280,17 @@ class Scheduler:
             logger.info('Step 5：無符合門檻的進場訊號（門檻=%.0f）', effective_threshold)
 
         results['steps']['signals'] = {
-            'status':           'OK',
-            'entry_count':      len(entry_signals),
-            'dispatched':       dispatched,
-            'score_threshold':  effective_threshold,
+            'status':          'OK',
+            'entry_count':     len(entry_signals),
+            'dispatched':      dispatched,
+            'score_threshold': effective_threshold,
         }
 
         # ── Step 6：歸因分析（含 Alpha 拆解 + 環境回饋）─────────────────
         logger.info('Step 6：執行歸因分析')
         try:
-            attr_result = await attribution.analyze_closed_positions(30, trade_date)
-            regime_fb   = attr_result.get('regime_ev_feedback', {})
+            attr_result  = await attribution.analyze_closed_positions(30, trade_date)
+            regime_fb    = attr_result.get('regime_ev_feedback', {})
             triggered_fb = [r for r, fb in regime_fb.items() if fb.get('triggered')]
             if triggered_fb:
                 logger.warning('環境回饋觸發：%s 進場門檻已自動提高', triggered_fb)
@@ -322,6 +340,7 @@ class Scheduler:
 
 if __name__ == '__main__':
     async def main():
+        # [BUG B 修正] 不傳入 config_path，讓 __init__ 自動用絕對路徑定位
         scheduler = Scheduler()
         await scheduler.connect()
         try:

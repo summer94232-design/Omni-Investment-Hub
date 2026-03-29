@@ -195,6 +195,114 @@ async def handle_api_reduce_position(request):
         )
 
 
+async def handle_api_merge_positions(request):
+    """
+    相同 ticker 的多筆開倉合併為一筆。
+    合併規則：
+      - 保留 entry_date 最早那筆（主筆）
+      - 加權平均成本 = Σ(shares × avg_cost) / Σshares
+      - current_shares / initial_shares 加總
+      - realized_pnl 加總
+      - 其餘欄位（state、stop、atr 等）以主筆為準
+      - 副筆標記 is_open=FALSE, exit_reason='MERGED'
+    Body: { "ticker": "2330" }  ← 可指定單一 ticker，不傳則合併所有重複 ticker
+    """
+    hub  = request.app['hub']
+    body = await request.json()
+    target_ticker = body.get('ticker', '').strip().upper()
+
+    try:
+        if target_ticker:
+            ticker_padded = target_ticker.ljust(6)[:6]
+            dup_rows = await hub.fetch("""
+                SELECT ticker FROM positions
+                WHERE is_open = TRUE AND ticker = $1
+                GROUP BY ticker HAVING COUNT(*) > 1
+            """, ticker_padded)
+        else:
+            dup_rows = await hub.fetch("""
+                SELECT ticker FROM positions
+                WHERE is_open = TRUE
+                GROUP BY ticker HAVING COUNT(*) > 1
+            """)
+
+        if not dup_rows:
+            return web.Response(
+                text=json.dumps({'ok': True, 'merged': 0, 'message': '沒有需要合併的重複持倉'}),
+                content_type='application/json'
+            )
+
+        merged_count  = 0
+        merged_detail = []
+
+        for row in dup_rows:
+            tk = row['ticker']
+            positions = await hub.fetch("""
+                SELECT id, ticker, current_shares, avg_cost, initial_shares,
+                       realized_pnl, entry_date
+                FROM positions
+                WHERE is_open = TRUE AND ticker = $1
+                ORDER BY entry_date ASC
+            """, tk)
+
+            if len(positions) < 2:
+                continue
+
+            main_pos  = positions[0]
+            sub_poses = positions[1:]
+
+            total_shares      = sum(int(p['current_shares']) for p in positions)
+            total_cost        = sum(int(p['current_shares']) * float(p['avg_cost'] or 0) for p in positions)
+            new_avg_cost      = round(total_cost / total_shares, 4) if total_shares > 0 else float(main_pos['avg_cost'] or 0)
+            total_init_shares = sum(int(p['initial_shares']) for p in positions)
+            total_realized_pnl = sum(float(p['realized_pnl'] or 0) for p in positions)
+
+            await hub.execute("""
+                UPDATE positions SET
+                    current_shares = $1,
+                    initial_shares = $2,
+                    avg_cost       = $3,
+                    realized_pnl   = $4
+                WHERE id = $5
+            """, total_shares, total_init_shares, new_avg_cost,
+                total_realized_pnl, main_pos['id'])
+
+            for sub in sub_poses:
+                await hub.execute("""
+                    UPDATE positions SET
+                        is_open     = FALSE,
+                        exit_date   = $1,
+                        exit_reason = 'MERGED',
+                        state       = 'CLOSED'
+                    WHERE id = $2
+                """, date.today(), sub['id'])
+
+            merged_count += 1
+            merged_detail.append({
+                'ticker':         tk.strip(),
+                'merged_into_id': main_pos['id'],
+                'total_shares':   total_shares,
+                'new_avg_cost':   new_avg_cost,
+                'sub_closed':     len(sub_poses),
+            })
+
+        return web.Response(
+            text=json.dumps({
+                'ok':     True,
+                'merged': merged_count,
+                'detail': merged_detail,
+            }, default=serialize, ensure_ascii=False),
+            content_type='application/json'
+        )
+
+    except Exception as e:
+        logger.exception('handle_api_merge_positions 失敗')
+        return web.Response(
+            text=json.dumps({'ok': False, 'error': str(e)}, ensure_ascii=False),
+            content_type='application/json', status=500,
+        )
+
+
 async def handle_api_add_position(request):
     hub  = request.app['hub']
     body = await request.json()
@@ -280,7 +388,6 @@ async def handle_api_run_scheduler(request):
     """
     hub = request.app['hub']
     try:
-        # [BUG 12 修正] 絕對路徑讀取 config.yaml
         config_path = os.path.join(BASE_DIR, 'config.yaml')
 
         from modules.scheduler import Scheduler
@@ -323,7 +430,6 @@ async def handle_api_ev_simulate(request):
 async def handle_api_black_swan(request):
     hub = request.app['hub']
     try:
-        # [BUG 12 修正] 絕對路徑讀取 config.yaml
         config_path = os.path.join(BASE_DIR, 'config.yaml')
         with open(config_path, encoding='utf-8') as f:
             cfg = yaml.safe_load(f)
@@ -417,6 +523,7 @@ async def create_app():
     app.router.add_post('/api/settings/save',          handle_api_settings_save)
     app.router.add_post('/api/close-position',         handle_api_close_position)
     app.router.add_post('/api/reduce-position',        handle_api_reduce_position)
+    app.router.add_post('/api/merge-positions',        handle_api_merge_positions)  # [新增]
     app.router.add_post('/api/add-position',           handle_api_add_position)
     app.router.add_post('/api/add-event',              handle_api_add_event)
     app.router.add_post('/api/watchlist/add',          handle_api_watchlist_add)

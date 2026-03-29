@@ -1,4 +1,14 @@
 # modules/event_calendar.py
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 修正（v3.1）：
+# - [BUG E] get_active_rules() 時間窗口邊界修正
+#           原本 BETWEEN 條件語義混淆（兩個重複條件），三個窗口邊界不清
+#           修正後改用精確三窗口邊界：
+#             事前窗口（PRE）  ：event_date - 3 ≤ trade_date < event_date
+#             事中（DURING）   ：trade_date = event_date
+#             事後窗口（POST） ：event_date < trade_date ≤ event_date + 3
+# ═══════════════════════════════════════════════════════════════════════════════
+
 import logging
 from datetime import date, timedelta
 from typing import Optional
@@ -42,7 +52,13 @@ class EventCalendar:
         ticker: Optional[str] = None,
         trade_date: Optional[date] = None,
     ) -> list[dict]:
-        """取得當前生效的事件規則（事前/事中/事後）"""
+        """取得當前生效的事件規則（事前/事中/事後）
+
+        三窗口邊界定義（[BUG E 修正]）：
+          PRE    事前窗口：event_date - 3 ≤ trade_date < event_date
+          DURING 事中    ：trade_date = event_date
+          POST   事後窗口：event_date < trade_date ≤ event_date + 3
+        """
         if trade_date is None:
             trade_date = date.today()
 
@@ -51,13 +67,10 @@ class EventCalendar:
         if cached:
             return cached
 
-        # [BUG FIX] 原本寫了兩個 BETWEEN 條件，語義重疊且容易造成漏抓或重複。
-        # 三個窗口可用一個連續區間完整覆蓋：
-        #   事後窗口起點 = trade_date - 2 days
-        #   事前窗口終點 = trade_date + 5 days
-        # 因此只需一個 BETWEEN $1 AND $2 即可，再由 Python 端依 days_to_event 分類窗口。
-        window_start = trade_date - timedelta(days=2)   # 事後：-2 天
-        window_end   = trade_date + timedelta(days=5)   # 事前：+5 天
+        # [BUG E 修正] 用精確的三窗口邊界取代原本語義混淆的 BETWEEN
+        # 完整覆蓋範圍：trade_date 位於 [event_date-3, event_date+3] 的所有事件
+        window_start = trade_date - timedelta(days=3)   # 事後窗口最遠覆蓋：+3 天前
+        window_end   = trade_date + timedelta(days=3)   # 事前窗口最遠覆蓋：-3 天後
 
         rows = await self.hub.fetch("""
             SELECT event_date, event_type, name, impact_level,
@@ -69,23 +82,32 @@ class EventCalendar:
 
         active_rules = []
         for row in rows:
-            r              = dict(row)
-            days_to_event  = (r['event_date'] - trade_date).days
+            r             = dict(row)
+            event_date    = r['event_date']
+            days_to_event = (event_date - trade_date).days
 
+            # [BUG E 修正] 精確三窗口分類
             if days_to_event > 0:
+                # 事前窗口：1 ≤ days_to_event ≤ 3（event_date 在 trade_date 之後）
                 window = 'PRE'
                 rule   = r['pre_rule']
             elif days_to_event == 0:
+                # 事中：當天
                 window = 'DURING'
                 rule   = r['during_rule']
             else:
+                # 事後窗口：-3 ≤ days_to_event ≤ -1（event_date 在 trade_date 之前）
                 window = 'POST'
                 rule   = r['post_rule']
+
+            # 跳過無規則的窗口（rule 為 None 表示該窗口無需處理）
+            if rule is None:
+                continue
 
             active_rules.append({
                 'event_name':    r['name'],
                 'event_type':    r['event_type'],
-                'event_date':    str(r['event_date']),
+                'event_date':    str(event_date),
                 'days_to_event': days_to_event,
                 'window':        window,
                 'rule':          rule,
@@ -128,9 +150,9 @@ class EventCalendar:
         if trade_date is None:
             trade_date = date.today()
 
-        upcoming     = await self.get_upcoming_events(7, trade_date)
-        active       = await self.get_active_rules(trade_date=trade_date)
-        high_impact  = [e for e in upcoming if e['impact_level'] >= 4]
+        upcoming    = await self.get_upcoming_events(7, trade_date)
+        active      = await self.get_active_rules(trade_date=trade_date)
+        high_impact = [e for e in upcoming if e['impact_level'] >= 4]
 
         logger.info(
             "事件日曆：未來7日 %d 個事件，%d 個高影響力",
