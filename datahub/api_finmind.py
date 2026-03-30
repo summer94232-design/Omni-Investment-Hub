@@ -1,14 +1,12 @@
 # datahub/api_finmind.py
 # ═══════════════════════════════════════════════════════════════════════════════
-# 變更紀錄（v3）：
-# - [大盤成交量] 新增 get_twii_volume()：
-#     拉取加權指數（Y9999）歷史資料，包含 volume（成交量，元）
-#     供 MacroFilter 寫入 market_regime.market_volume
-# - [加權指數收盤價] 新增 get_twii_price()：
-#     取得加權指數近期收盤價，供 MacroFilter 計算基差分母（tsec_index_price）
-# - [除息點數] 新增 get_upcoming_dividends()：
-#     查詢未來 30 日預計除息個股，加總預估除息點數
-#     供 MacroFilter 計算 dividend_adjustment
+# 變更紀錄（v3.3）：
+# - [大盤成交量] 新增 get_twii_volume()
+# - [加權指數收盤價] 新增 get_twii_price()
+# - [除息點數] 新增 get_upcoming_dividends()
+# - [基本面資料] 新增 get_financial_statements()：EPS / ROE / 營收成長率
+# - [估值資料]   新增 get_per_pbr()：PE / PB / 殖利率（每日更新）
+# - [題材新聞]   新增 get_topic_news_count()：取代 topic_radar 隨機模擬數據
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import logging
@@ -21,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 FINMIND_BASE_URL = "https://api.finmindtrade.com/api/v4"
 
-# 加權指數在 FinMind 的代碼
 TWII_TICKER = "Y9999"
 
 
@@ -31,6 +28,8 @@ class FinMindAPI:
     def __init__(self, token: str):
         self._token = token
         self._client = httpx.AsyncClient(timeout=30.0)
+        # 新聞快取（key: trade_date_str → list[dict]），避免同日多次請求
+        self._news_cache: dict[str, list[dict]] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -53,7 +52,7 @@ class FinMindAPI:
             logger.error("FinMind HTTP 錯誤 dataset=%s: %s", dataset, e)
             return []
 
-    # ── 原有方法（不變）─────────────────────────────────────────────────────
+    # ── 原有方法 ─────────────────────────────────────────────────────────────
 
     async def get_stock_price(
         self,
@@ -69,27 +68,32 @@ class FinMindAPI:
         if end_date:
             params["end_date"] = end_date
         rows = await self._get("TaiwanStockPrice", params)
-        return pd.DataFrame(rows)
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        rename_map = {
+            "date": "date", "open": "open", "max": "max",
+            "min": "min", "close": "close", "volume": "volume",
+        }
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+        df["close"] = pd.to_numeric(df.get("close", pd.Series(dtype=float)), errors="coerce")
+        return df
 
-    async def get_institutional_investors(
+    async def get_chip_data(
         self,
         ticker: str,
         start_date: str,
+        end_date: Optional[str] = None,
     ) -> pd.DataFrame:
-        """取得三大法人買賣超"""
-        params = {"data_id": ticker, "start_date": start_date}
-        rows = await self._get("TaiwanStockInstitutionalInvestorsBuySell", params)
-        return pd.DataFrame(rows)
-
-    async def get_margin_trading(
-        self,
-        ticker: str,
-        start_date: str,
-    ) -> pd.DataFrame:
-        """取得融資融券"""
-        params = {"data_id": ticker, "start_date": start_date}
-        rows = await self._get("TaiwanStockMarginPurchaseShortSale", params)
-        return pd.DataFrame(rows)
+        """取得外資/投信籌碼（InstitutionalInvestors）"""
+        params: dict[str, Any] = {
+            "data_id":    ticker,
+            "start_date": start_date,
+        }
+        if end_date:
+            params["end_date"] = end_date
+        rows = await self._get("TaiwanStockInstitutionalInvestors", params)
+        return pd.DataFrame(rows) if rows else pd.DataFrame()
 
     async def get_revenue(
         self,
@@ -97,174 +101,154 @@ class FinMindAPI:
         start_date: str,
     ) -> pd.DataFrame:
         """取得月營收"""
-        params = {"data_id": ticker, "start_date": start_date}
-        rows = await self._get("TaiwanStockMonthRevenue", params)
-        return pd.DataFrame(rows)
-
-    # ── [v3 新增] 大盤相關方法 ───────────────────────────────────────────────
-
-    async def get_twii_price(
-        self,
-        start_date: Optional[str] = None,
-        limit_days: int = 5,
-    ) -> Optional[float]:
-        """
-        取得加權指數最新收盤價（供基差計算的分母 tsec_index_price）
-
-        FinMind dataset: TaiwanStockPrice，ticker: Y9999
-        回傳最近一個交易日的收盤價，無資料時回傳 None
-
-        參數：
-            start_date: 起始日期（預設為 30 天前）
-            limit_days: 往回查幾天（避免假日無資料）
-        """
-        if start_date is None:
-            start_date = str(date.today() - timedelta(days=30))
-
-        rows = await self._get("TaiwanStockPrice", {
-            "data_id":    TWII_TICKER,
+        rows = await self._get("TaiwanStockMonthRevenue", {
+            "data_id":    ticker,
             "start_date": start_date,
         })
-
-        if not rows:
-            logger.warning("無法取得加權指數收盤價（Y9999）")
-            return None
-
-        df = pd.DataFrame(rows).sort_values("date")
-        if df.empty or "close" not in df.columns:
-            return None
-
-        try:
-            latest_close = float(df["close"].iloc[-1])
-            logger.debug("加權指數最新收盤價：%.2f（%s）", latest_close, df["date"].iloc[-1])
-            return latest_close
-        except (ValueError, IndexError):
-            return None
-
-    async def get_twii_volume(
-        self,
-        start_date: Optional[str] = None,
-    ) -> Optional[int]:
-        """
-        取得加權指數最新成交量（供 market_regime.market_volume 寫入）
-
-        FinMind TaiwanStockPrice 的 volume 欄位對 Y9999 代表大盤總成交量（元）
-        回傳最近一個交易日的成交量（元），無資料時回傳 None
-
-        注意：
-            FinMind 的 Y9999 成交量單位為「元」（非千元），直接存入即可
-        """
-        if start_date is None:
-            start_date = str(date.today() - timedelta(days=10))
-
-        rows = await self._get("TaiwanStockPrice", {
-            "data_id":    TWII_TICKER,
-            "start_date": start_date,
-        })
-
-        if not rows:
-            logger.warning("無法取得加權指數成交量（Y9999）")
-            return None
-
-        df = pd.DataFrame(rows).sort_values("date")
-        if df.empty or "Trading_Volume" not in df.columns:
-            # 欄位名稱備援：有些版本用 volume
-            vol_col = "volume" if "volume" in df.columns else None
-            if vol_col is None:
-                logger.warning("Y9999 DataFrame 無 Trading_Volume 或 volume 欄位，欄位：%s", df.columns.tolist())
-                return None
-        else:
-            vol_col = "Trading_Volume"
-
-        try:
-            latest_vol = int(float(df[vol_col].iloc[-1]))
-            logger.debug("大盤最新成交量：%d 元（%s）", latest_vol, df["date"].iloc[-1])
-            return latest_vol
-        except (ValueError, IndexError):
-            return None
-
-    async def get_twii_history(
-        self,
-        start_date: str,
-        end_date: Optional[str] = None,
-    ) -> pd.DataFrame:
-        """
-        取得加權指數歷史 OHLCV（供 MacroFilter 批次計算 MA 成交量）
-
-        回傳 DataFrame，欄位包含：date, open, max, min, close, Trading_Volume
-        """
-        params: dict[str, Any] = {
-            "data_id":    TWII_TICKER,
-            "start_date": start_date,
-        }
-        if end_date:
-            params["end_date"] = end_date
-        rows = await self._get("TaiwanStockPrice", params)
         if not rows:
             return pd.DataFrame()
-        df = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+        df = pd.DataFrame(rows)
+        if "revenue" in df.columns:
+            df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce")
         return df
 
-    async def get_upcoming_dividends(
+    async def get_margin_trading(
         self,
-        watchlist: list[str],
-        reference_date: Optional[date] = None,
-        days_ahead: int = 30,
-    ) -> float:
-        """
-        估算近期除息點數（dividend_adjustment），供基差公式的分母校正。
+        ticker: str,
+        start_date: str,
+    ) -> pd.DataFrame:
+        """取得信用交易（融資/融券）"""
+        rows = await self._get("TaiwanStockMarginPurchaseShortSale", {
+            "data_id":    ticker,
+            "start_date": start_date,
+        })
+        return pd.DataFrame(rows) if rows else pd.DataFrame()
 
-        計算方式：
-            對 watchlist 中各股，查詢未來 days_ahead 日內的除息金額（cash_dividend）
-            按各股在加權指數的概估權重加總，轉換為點數。
+    async def get_twii_price(self, days: int = 5) -> Optional[float]:
+        """取得加權指數最新收盤價（供 BasisFilter 計算分母）"""
+        start = str(date.today() - timedelta(days=days + 5))
+        rows  = await self._get("TaiwanStockPrice", {
+            "data_id":    TWII_TICKER,
+            "start_date": start,
+        })
+        if not rows:
+            return None
+        df = pd.DataFrame(rows).sort_values("date")
+        return float(df["close"].iloc[-1]) if not df.empty else None
 
-        簡化假設：
-            - 加權指數點數 ≈ 各成分股股價加權，1 元除息 ≈ 指數下降約 0.05 點（粗估）
-            - 此估算精度夠用於 Normalized Basis 計算，不需要精確的指數成分股權重
+    async def get_twii_volume(self, days: int = 5) -> Optional[float]:
+        """取得大盤日成交量（元）"""
+        start = str(date.today() - timedelta(days=days + 5))
+        rows  = await self._get("TaiwanStockPrice", {
+            "data_id":    TWII_TICKER,
+            "start_date": start,
+        })
+        if not rows:
+            return None
+        df = pd.DataFrame(rows).sort_values("date")
+        return float(df["Trading_money"].iloc[-1]) if "Trading_money" in df.columns and not df.empty else None
 
-        資料來源：
-            FinMind TaiwanStockDividend dataset
-
-        回傳：
-            預估未來 30 日除息點數（正值），無資料時回傳 0.0
-        """
-        if reference_date is None:
-            reference_date = date.today()
-
-        start_str = str(reference_date)
-        end_str   = str(reference_date + timedelta(days=days_ahead))
-
-        total_div_points = 0.0
-
-        # 對主要大型股（市值佔指數比例高）估算除息影響
-        # 完整做法需要精確指數成分股權重，這裡用簡化方式
-        MAJOR_TICKERS = ['2330', '2317', '2454', '2303', '2882', '2412']
-        target_tickers = [t for t in watchlist if t.strip() in MAJOR_TICKERS]
-
-        if not target_tickers:
+    async def get_upcoming_dividends(self, days_ahead: int = 30) -> float:
+        """取得未來 N 日預計除息點數加總（供基差計算）"""
+        start = str(date.today())
+        end   = str(date.today() + timedelta(days=days_ahead))
+        rows  = await self._get("TaiwanStockDividendResult", {
+            "start_date": start,
+            "end_date":   end,
+        })
+        if not rows:
             return 0.0
+        total = sum(float(r.get("StockExDividend", 0) or 0) for r in rows)
+        return round(total, 4)
 
-        for ticker in target_tickers:
+    # ── v3.3 新增方法 ─────────────────────────────────────────────────────────
+
+    async def get_financial_statements(
+        self,
+        ticker: str,
+        quarters: int = 8,
+    ) -> pd.DataFrame:
+        """
+        取得綜合損益表（季報），用於計算 EPS 成長率、ROE。
+
+        dataset: TaiwanStockFinancialStatements
+        回傳欄位包含: date, type, value（單位：千元）
+
+        用法範例：
+            df = await finmind.get_financial_statements('2330')
+            eps_rows = df[df['type'] == 'EPS']
+        """
+        start = str(date.today() - timedelta(days=365 * (quarters // 4 + 1)))
+        rows  = await self._get("TaiwanStockFinancialStatements", {
+            "data_id":    ticker,
+            "start_date": start,
+        })
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        if "value" in df.columns:
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        return df
+
+    async def get_per_pbr(self, ticker: str) -> dict[str, Optional[float]]:
+        """
+        取得本益比（PER）、淨值比（PBR）、殖利率（DividendYield）最新值。
+
+        dataset: TaiwanStockPER（每日更新）
+        回傳: {'per': float|None, 'pbr': float|None, 'dividend_yield': float|None}
+        """
+        start = str(date.today() - timedelta(days=10))
+        rows  = await self._get("TaiwanStockPER", {
+            "data_id":    ticker,
+            "start_date": start,
+        })
+        if not rows:
+            return {"per": None, "pbr": None, "dividend_yield": None}
+
+        # 取最後一筆有效值
+        rows_sorted = sorted(rows, key=lambda r: r.get("date", ""))
+        latest = rows_sorted[-1]
+        def _safe_float(val) -> Optional[float]:
             try:
-                rows = await self._get("TaiwanStockDividend", {
-                    "data_id":    ticker.strip(),
-                    "start_date": start_str,
-                    "end_date":   end_str,
-                })
-                for row in rows:
-                    cash_div = float(row.get("CashEarningsDistribution") or
-                                     row.get("cash_dividend") or 0)
-                    if cash_div > 0:
-                        # 粗估：大型股 1 元現金股息 ≈ 指數 -5~-20 點
-                        # 台積電權重最重，其他相對小
-                        weight_factor = 20.0 if ticker.strip() == "2330" else 3.0
-                        total_div_points += cash_div * weight_factor
-                        logger.debug(
-                            "除息估算：%s 現金股息 %.2f 元 → 估計影響 %.1f 點",
-                            ticker, cash_div, cash_div * weight_factor
-                        )
-            except Exception as e:
-                logger.warning("取得 %s 除息資料失敗：%s", ticker, e)
+                v = float(val)
+                return None if v <= 0 else v
+            except (TypeError, ValueError):
+                return None
 
-        logger.info("未來 %d 日預估除息點數：%.1f", days_ahead, total_div_points)
-        return round(total_div_points, 2)
+        return {
+            "per":            _safe_float(latest.get("PER")),
+            "pbr":            _safe_float(latest.get("PBR")),
+            "dividend_yield": _safe_float(latest.get("DividendYield")),
+        }
+
+    async def get_topic_news_count(
+        self,
+        topic: str,
+        trade_date: date,
+    ) -> int:
+        """
+        計算特定題材關鍵字在 FinMind 新聞資料中的當日出現次數。
+        取代 topic_radar._simulate_raw_count() 的隨機模擬邏輯。
+
+        - 採用內部日期快取，同一天只請求一次 API，避免超量計費
+        - 搜尋範圍：標題（title）+ 摘要（description）
+        - 使用 TaiwanStockNews dataset
+        """
+        cache_key = str(trade_date)
+        if cache_key not in self._news_cache:
+            start = str(trade_date - timedelta(days=1))
+            end   = str(trade_date)
+            rows  = await self._get("TaiwanStockNews", {
+                "start_date": start,
+                "end_date":   end,
+            })
+            self._news_cache[cache_key] = rows
+            logger.debug("新聞快取建立：%s，共 %d 筆", cache_key, len(rows))
+
+        news = self._news_cache[cache_key]
+        count = sum(
+            1 for r in news
+            if topic in (r.get("title", "") + " " + r.get("description", ""))
+        )
+        logger.debug("題材關鍵字 [%s] 出現次數：%d", topic, count)
+        return count

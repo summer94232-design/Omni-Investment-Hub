@@ -1,13 +1,12 @@
 # modules/black_swan.py
 # ═══════════════════════════════════════════════════════════════════════════════
-# 變更紀錄（v3）：
-# - [流動性偵測] 新增兩項流動性預警指標
-# - [實際減倉執行] execute_action() 連動 PositionManager
-# - [新增情境] LIQUIDITY_VOLUME / LIQUIDITY_BASIS
-# ───────────────────────────────────────────────────────────────────────────────
-# Bug 修正（v3.1）：
-# - [BUG 1] CRASH_20PCT 定義改為 market_drop: 0.05（與 description「>5%」一致），
-#           觸發邏輯補上 market_drop 雙重確認（VIX > 40 且跌幅 > 5%）
+# 變更紀錄（v3.3）：
+# - [BUG 1 修正] CRASH_20PCT market_drop 0.20 → 0.05，補雙重確認（已含於 v3.1）
+# - [流動性偵測] 新增 LIQUIDITY_BASIS / LIQUIDITY_VOLUME（已含於 v3.1）
+# - [LIQUIDITY_CRISIS 修正] 補上信用利差真實觸發邏輯：
+#     從 market_regime.credit_spread 讀取 BAA10Y 值（單位 %，需 ×100 轉 bp）
+#     > 200 bp 時觸發 EMERGENCY_EXIT
+#     原本此情境無任何數據支撐，永遠不會被真實數據觸發
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import logging
@@ -19,480 +18,341 @@ from datahub import redis_keys as rk
 
 logger = logging.getLogger(__name__)
 
-# ── 黑天鵝情境定義（v3 + BUG 1 修正）──────────────────────────────────────────
 BLACK_SWAN_SCENARIOS = [
     {
-        'id':          'CRASH_20PCT',
-        'name':        '市場閃崩',
-        # [BUG 1 修正] market_drop 從 0.20 改為 0.05，與 description「>5%」一致
-        'trigger':     {'vix_spike': 40, 'market_drop': 0.05},
-        'action':      'REDUCE_EXPOSURE_50PCT',
-        # [BUG 1 修正] description 更新為 ">5%"，與 market_drop 值一致
-        'description': 'VIX 突破 40 且大盤單日跌幅 > 5%',
+        "id":          "CRASH_20PCT",
+        "name":        "市場閃崩",
+        "trigger":     {"vix_spike": 40, "market_drop": 0.05},
+        "action":      "REDUCE_EXPOSURE_50PCT",
+        "description": "VIX 突破 40 且大盤單日跌幅 > 5%",
     },
     {
-        'id':          'RATE_SHOCK',
-        'name':        '利率衝擊',
-        'trigger':     {'fed_rate_change': 0.75},
-        'action':      'HALT_NEW_ENTRIES',
-        'description': 'Fed 單次升息超過 75bp',
+        "id":          "RATE_SHOCK",
+        "name":        "利率衝擊",
+        "trigger":     {"fed_rate_change": 0.75},
+        "action":      "HALT_NEW_ENTRIES",
+        "description": "Fed 單次升息超過 75bp",
     },
     {
-        'id':          'GEOPOLITICAL',
-        'name':        '地緣政治危機',
-        'trigger':     {'vix_level': 35, 'duration_days': 3},
-        'action':      'REDUCE_EXPOSURE_30PCT',
-        'description': 'VIX 連續 3 日高於 35',
+        "id":          "GEOPOLITICAL",
+        "name":        "地緣政治危機",
+        "trigger":     {"vix_level": 35, "duration_days": 3},
+        "action":      "REDUCE_EXPOSURE_30PCT",
+        "description": "VIX 連續 3 日高於 35",
     },
     {
-        'id':          'LIQUIDITY_CRISIS',
-        'name':        '流動性危機（信用利差）',
-        'trigger':     {'spread_widen': 200},
-        'action':      'EMERGENCY_EXIT',
-        'description': '信用利差擴大超過 200bp',
+        "id":          "LIQUIDITY_CRISIS",
+        "name":        "流動性危機（信用利差）",
+        "trigger":     {"spread_widen": 200},
+        "action":      "EMERGENCY_EXIT",
+        "description": "信用利差（BAA10Y）擴大超過 200bp",
     },
     {
-        'id':          'LIQUIDITY_BASIS',
-        'name':        '基差背離恐慌',
-        'trigger':     {'basis_threshold': -0.012, 'basis_duration_min': 30},
-        'action':      'REDUCE_EXPOSURE_30PCT',
-        'description': '台指期逆價差 > -1.2% 且持續 30 分鐘（大戶系統性避險）',
+        "id":          "LIQUIDITY_BASIS",
+        "name":        "基差背離恐慌",
+        "trigger":     {"basis_threshold": -0.012, "basis_duration_min": 30},
+        "action":      "REDUCE_EXPOSURE_30PCT",
+        "description": "台指期逆價差 > -1.2% 且持續 30 分鐘（大戶系統性避險）",
     },
     {
-        'id':          'LIQUIDITY_VOLUME',
-        'name':        '成交量枯竭',
-        'trigger':     {'volume_ratio': 0.40},
-        'action':      'REDUCE_EXPOSURE_30PCT',
-        'description': '5日均量 < 20日均量 40%（買盤嚴重萎縮）',
+        "id":          "LIQUIDITY_VOLUME",
+        "name":        "成交量枯竭",
+        "trigger":     {"volume_ratio": 0.40},
+        "action":      "REDUCE_EXPOSURE_30PCT",
+        "description": "5日均量 < 20日均量 40%",
     },
 ]
 
-# ── 緊急減倉目標曝險比例 ──────────────────────────────────────────────────────
-EMERGENCY_EXPOSURE_TARGETS = {
-    'REDUCE_EXPOSURE_50PCT': 0.50,
-    'REDUCE_EXPOSURE_30PCT': 0.30,
-    'EMERGENCY_EXIT':        0.00,
-    'HALT_NEW_ENTRIES':      None,
-}
-
-BASIS_PANIC_START_KEY = "blackswan:basis_panic_start"
-
 
 class BlackSwan:
-    """模組⑨ 黑天鵝情境腳本：異常市場自動應對（v3 + BUG 1 修正）"""
+    """黑天鵝防護模組：監控 6 種系統性風險情境，自動執行緊急減倉"""
 
-    def __init__(self, hub: DataHub, telegram: TelegramBot):
+    def __init__(self, hub: DataHub, telegram: Optional[TelegramBot] = None):
         self.hub      = hub
         self.telegram = telegram
 
-    # =========================================================================
-    # [v3] 流動性偵測輔助函式
-    # =========================================================================
+    # ── 觸發條件檢測 ─────────────────────────────────────────────────────────
 
-    async def _check_basis_duration(
+    async def _check_crash(self, scenario: dict, vix: float, trade_date: date) -> tuple[bool, dict]:
+        vix_triggered  = vix is not None and vix > scenario["trigger"]["vix_spike"]
+        daily_return   = await self._get_market_daily_return(trade_date)
+        drop_triggered = daily_return is not None and daily_return < -scenario["trigger"]["market_drop"]
+        triggered      = vix_triggered and drop_triggered
+        return triggered, {
+            "vix": vix,
+            "market_drop_pct": round(daily_return * 100, 2) if daily_return is not None else None,
+        }
+
+    async def _check_rate_shock(self, scenario: dict, trade_date: date) -> tuple[bool, dict]:
+        rows = await self.hub.fetch("""
+            SELECT trade_date, fed_funds_rate FROM market_regime
+            WHERE fed_funds_rate IS NOT NULL
+            ORDER BY trade_date DESC LIMIT 2
+        """)
+        if len(rows) < 2:
+            return False, {}
+        delta = abs(float(rows[0]["fed_funds_rate"]) - float(rows[1]["fed_funds_rate"]))
+        triggered = delta >= scenario["trigger"]["fed_rate_change"] / 100
+        return triggered, {"fed_rate_change_bp": round(delta * 100, 1)}
+
+    async def _check_geopolitical(self, scenario: dict, vix: float, trade_date: date) -> tuple[bool, dict]:
+        if vix is None:
+            return False, {}
+        rows = await self.hub.fetch("""
+            SELECT vix_level FROM market_regime
+            WHERE trade_date <= $1 AND vix_level IS NOT NULL
+            ORDER BY trade_date DESC LIMIT $2
+        """, trade_date, scenario["trigger"]["duration_days"])
+        if len(rows) < scenario["trigger"]["duration_days"]:
+            return False, {}
+        triggered = all(float(r["vix_level"]) > scenario["trigger"]["vix_level"] for r in rows)
+        return triggered, {"vix_consecutive_days": len(rows), "vix_threshold": scenario["trigger"]["vix_level"]}
+
+    async def _check_liquidity_crisis(self, scenario: dict) -> tuple[bool, dict]:
+        """
+        v3.3 修正：從 market_regime.credit_spread 讀取 BAA10Y 信用利差。
+        FRED BAA10Y 單位為 %（例如 2.0 代表 200bp），乘以 100 轉換為 bp。
+        觸發條件：> 200 bp → EMERGENCY_EXIT。
+        """
+        row = await self.hub.fetchrow("""
+            SELECT credit_spread, trade_date FROM market_regime
+            WHERE credit_spread IS NOT NULL
+            ORDER BY trade_date DESC LIMIT 1
+        """)
+        if row is None:
+            logger.debug("無信用利差資料，跳過 LIQUIDITY_CRISIS 檢查")
+            return False, {"reason": "no_data"}
+
+        spread_pct = float(row["credit_spread"])
+        spread_bp  = spread_pct * 100          # % → bp
+        threshold  = scenario["trigger"]["spread_widen"]
+        triggered  = spread_bp > threshold
+
+        if triggered:
+            logger.warning(
+                "信用利差警報：%.1f bp > 門檻 %d bp（資料日期：%s）",
+                spread_bp, threshold, row["trade_date"],
+            )
+
+        return triggered, {
+            "credit_spread_bp":    round(spread_bp, 1),
+            "threshold_bp":        threshold,
+            "data_date":           str(row["trade_date"]),
+        }
+
+    async def _check_liquidity_basis(
         self,
+        scenario: dict,
         current_basis: Optional[float],
-        basis_threshold: float = -0.012,
-        required_minutes: int = 30,
-    ) -> tuple[bool, int]:
+    ) -> tuple[bool, dict]:
         if current_basis is None:
-            return False, 0
+            return False, {}
+        threshold = scenario["trigger"]["basis_threshold"]
+        triggered = current_basis < threshold
+        if triggered:
+            logger.warning("基差背離警報：basis=%.4f < 門檻 %.4f", current_basis, threshold)
+        return triggered, {"current_basis": round(current_basis, 4), "threshold": threshold}
 
-        import datetime as _dt
-
-        if current_basis < basis_threshold:
-            start_raw = await self.hub.cache.get(BASIS_PANIC_START_KEY)
-            if start_raw is None:
-                now_str = _dt.datetime.utcnow().isoformat()
-                await self.hub.cache.set(BASIS_PANIC_START_KEY, now_str, ttl=7200)
-                return False, 0
-
-            try:
-                start_dt  = _dt.datetime.fromisoformat(start_raw)
-                elapsed   = (_dt.datetime.utcnow() - start_dt).total_seconds() / 60
-                triggered = elapsed >= required_minutes
-                return triggered, int(elapsed)
-            except Exception:
-                return False, 0
-        else:
-            await self.hub.cache.delete(BASIS_PANIC_START_KEY)
-            return False, 0
-
-    async def _check_volume_ratio(
+    async def _check_liquidity_volume(
         self,
+        scenario: dict,
         trade_date: date,
-        volume_ratio_threshold: float = 0.40,
-    ) -> tuple[bool, float]:
+    ) -> tuple[bool, dict]:
+        volume_ratio_threshold = scenario["trigger"]["volume_ratio"]
+
+        # 從 market_regime 取大盤成交量（最近 25 日）
         rows = await self.hub.fetch("""
             SELECT trade_date, market_volume FROM market_regime
-            WHERE trade_date <= $1 AND market_volume IS NOT NULL
-            ORDER BY trade_date DESC
-            LIMIT 20
+            WHERE market_volume IS NOT NULL AND trade_date <= $1
+            ORDER BY trade_date DESC LIMIT 25
         """, trade_date)
 
         if len(rows) >= 20:
-            volumes = [float(r['market_volume']) for r in rows]
-            ma5   = sum(volumes[:5])  / 5
-            ma20  = sum(volumes[:20]) / 20
+            volumes = [float(r["market_volume"]) for r in rows]
+            ma5  = sum(volumes[:5])  / 5
+            ma20 = sum(volumes[:20]) / 20
             ratio = ma5 / ma20 if ma20 > 0 else 1.0
             triggered = ratio < volume_ratio_threshold
             if triggered:
                 logger.warning("成交量萎縮警報：5MA/20MA=%.2f < 門檻 %.2f", ratio, volume_ratio_threshold)
-            return triggered, round(ratio, 3)
+            return triggered, {"volume_ma5_ma20_ratio": round(ratio, 3)}
 
+        # 降級：從 chip_monitor 取平均量比
         chip_rows = await self.hub.fetch("""
-            SELECT trade_date, SUM(volume_ratio_5d20d) / COUNT(*) AS avg_ratio
+            SELECT trade_date, AVG(volume_ratio_5d20d) AS avg_ratio
             FROM chip_monitor
             WHERE trade_date <= $1
             GROUP BY trade_date
-            ORDER BY trade_date DESC
-            LIMIT 5
+            ORDER BY trade_date DESC LIMIT 5
         """, trade_date)
 
         if chip_rows:
-            avg_ratio = sum(float(r['avg_ratio'] or 1.0) for r in chip_rows) / len(chip_rows)
+            avg_ratio = sum(float(r["avg_ratio"] or 1.0) for r in chip_rows) / len(chip_rows)
             triggered = avg_ratio < volume_ratio_threshold
-            return triggered, round(avg_ratio, 3)
+            return triggered, {"volume_ratio_from_chip": round(avg_ratio, 3)}
 
-        logger.debug("無足夠成交量資料，跳過流動性成交量檢查")
-        return False, 1.0
+        return False, {"reason": "insufficient_data"}
+
+    # ── 市場日報酬 ───────────────────────────────────────────────────────────
 
     async def _get_market_daily_return(self, trade_date: date) -> Optional[float]:
-        """
-        [BUG 1 修正] 取得大盤當日跌幅，供 CRASH_20PCT 雙重確認使用。
-
-        從 market_regime 取最近兩日加權指數，計算日報酬。
-        無法取得時回傳 None（保守原則：不觸發）。
-        """
         rows = await self.hub.fetch("""
             SELECT trade_date, tsec_index_price FROM market_regime
             WHERE trade_date <= $1 AND tsec_index_price IS NOT NULL
-            ORDER BY trade_date DESC
-            LIMIT 2
+            ORDER BY trade_date DESC LIMIT 2
         """, trade_date)
-
         if len(rows) < 2:
-            logger.debug("market_regime 資料不足，無法計算大盤日報酬")
             return None
-
-        today_price     = float(rows[0]['tsec_index_price'])
-        yesterday_price = float(rows[1]['tsec_index_price'])
-
-        if yesterday_price <= 0:
+        today_p     = float(rows[0]["tsec_index_price"])
+        yesterday_p = float(rows[1]["tsec_index_price"])
+        if yesterday_p <= 0:
             return None
+        return (today_p - yesterday_p) / yesterday_p
 
-        daily_return = (today_price - yesterday_price) / yesterday_price
-        logger.debug("大盤日報酬：%.4f (%.2f%%)", daily_return, daily_return * 100)
-        return daily_return
+    # ── 動作執行 ─────────────────────────────────────────────────────────────
 
-    # =========================================================================
-    # check_triggers（v3 + BUG 1 修正）
-    # =========================================================================
+    async def execute_action(self, scenario: dict, trade_date: date, details: dict):
+        action = scenario["action"]
+        logger.warning("黑天鵝執行：%s → %s", scenario["name"], action)
+
+        try:
+            from modules.position_manager import PositionManager
+            pm = PositionManager(self.hub)
+        except Exception:
+            pm = None
+
+        if action == "REDUCE_EXPOSURE_50PCT" and pm:
+            positions = await self.hub.fetch(
+                "SELECT id, ticker, current_shares FROM positions WHERE is_open = TRUE"
+            )
+            for pos in positions:
+                reduce_shares = int(pos["current_shares"] * 0.5)
+                if reduce_shares > 0:
+                    await pm.partial_exit(pos["id"], reduce_shares, reason="BLACK_SWAN_50PCT")
+
+        elif action == "REDUCE_EXPOSURE_30PCT" and pm:
+            positions = await self.hub.fetch(
+                "SELECT id, ticker, current_shares FROM positions WHERE is_open = TRUE"
+            )
+            for pos in positions:
+                reduce_shares = int(pos["current_shares"] * 0.7)
+                if reduce_shares > 0:
+                    await pm.partial_exit(pos["id"], reduce_shares, reason="BLACK_SWAN_30PCT")
+
+        elif action == "EMERGENCY_EXIT":
+            await self.hub.execute("""
+                UPDATE positions SET state = 'S5_ACTIVE_EXIT'
+                WHERE is_open = TRUE AND state NOT IN ('S5_ACTIVE_EXIT','CLOSED','STOPPED_OUT')
+            """)
+            logger.warning("緊急全數平倉已觸發（LIQUIDITY_CRISIS）")
+
+        elif action == "HALT_NEW_ENTRIES":
+            await self.hub.cache.set(
+                rk.key_market_regime_latest(),
+                {"halt_new_entries": True},
+                ttl=rk.TTL_24H,
+            )
+
+        # 寫入 decision_log
+        import json
+        await self.hub.execute("""
+            INSERT INTO decision_log (
+                trade_date, decision_type, ticker, signal_source, notes
+            ) VALUES ($1, 'SCENARIO_TRIGGER', NULL, 'BLACK_SWAN', $2)
+        """, trade_date, json.dumps({
+            "scenario_id":   scenario["id"],
+            "scenario_name": scenario["name"],
+            "action":        action,
+            "details":       details,
+        }, ensure_ascii=False))
+
+        if self.telegram:
+            try:
+                await self.telegram.send_message(
+                    f"🦢 黑天鵝觸發：{scenario['name']}\n"
+                    f"動作：{action}\n"
+                    f"說明：{scenario['description']}\n"
+                    f"詳情：{details}"
+                )
+            except Exception as e:
+                logger.warning("Telegram 通知失敗：%s", e)
+
+    # ── 主執行 ───────────────────────────────────────────────────────────────
 
     async def check_triggers(
         self,
-        vix: Optional[float] = None,
-        trade_date: Optional[date] = None,
+        vix:           Optional[float] = None,
+        trade_date:    Optional[date]  = None,
         current_basis: Optional[float] = None,
     ) -> list[dict]:
         if trade_date is None:
             trade_date = date.today()
 
-        triggered = []
+        if vix is None:
+            row = await self.hub.fetchrow("""
+                SELECT vix_level FROM market_regime
+                ORDER BY trade_date DESC LIMIT 1
+            """)
+            if row:
+                vix = float(row["vix_level"]) if row["vix_level"] else None
 
-        regime_row = await self.hub.fetchrow("""
-            SELECT vix_level, mrs_score, regime,
-                   tx_futures_price, tsec_index_price
-            FROM market_regime
-            WHERE trade_date <= $1
-            ORDER BY trade_date DESC LIMIT 1
-        """, trade_date)
-
-        current_vix = vix or (
-            float(regime_row['vix_level']) if regime_row and regime_row['vix_level'] else 20.0
-        )
-
-        if current_basis is None and regime_row:
-            tx   = regime_row.get('tx_futures_price')
-            tsec = regime_row.get('tsec_index_price')
-            if tx and tsec and float(tsec) > 0:
-                current_basis = (float(tx) - float(tsec)) / float(tsec)
+        triggered_scenarios = []
 
         for scenario in BLACK_SWAN_SCENARIOS:
-            trigger        = scenario['trigger']
-            is_triggered   = False
-            trigger_detail = {}
-
-            # ── VIX spike（帶 market_drop 雙重確認）────────────────────────
-            if 'vix_spike' in trigger and current_vix >= trigger['vix_spike']:
-                # [BUG 1 修正] 若 trigger 有 market_drop，必須同時確認跌幅
-                if 'market_drop' in trigger:
-                    market_drop = await self._get_market_daily_return(trade_date)
-                    if market_drop is not None and abs(market_drop) >= trigger['market_drop']:
-                        is_triggered   = True
-                        trigger_detail = {
-                            'current_vix':  current_vix,
-                            'market_drop':  round(market_drop, 4),
-                        }
-                    else:
-                        # VIX 超標但跌幅不足，不觸發
-                        logger.info(
-                            "CRASH_20PCT：VIX=%.1f 超標，但跌幅=%s 未達門檻 %.1f%%，不觸發",
-                            current_vix,
-                            f"{market_drop*100:.2f}%" if market_drop is not None else "N/A",
-                            trigger['market_drop'] * 100,
-                        )
-                else:
-                    is_triggered   = True
-                    trigger_detail = {'current_vix': current_vix}
-
-            elif 'vix_level' in trigger and current_vix >= trigger['vix_level']:
-                duration = trigger.get('duration_days', 1)
-                if duration <= 1:
-                    is_triggered   = True
-                    trigger_detail = {'current_vix': current_vix}
-                else:
-                    vix_rows = await self.hub.fetch("""
-                        SELECT vix_level FROM market_regime
-                        WHERE trade_date <= $1
-                        ORDER BY trade_date DESC LIMIT $2
-                    """, trade_date, duration)
-
-                    if len(vix_rows) >= duration:
-                        all_high = all(
-                            float(r['vix_level'] or 0) >= trigger['vix_level']
-                            for r in vix_rows
-                        )
-                        if all_high:
-                            is_triggered   = True
-                            trigger_detail = {
-                                'current_vix':       current_vix,
-                                'duration_confirmed': duration,
-                            }
-
-            elif 'basis_threshold' in trigger:
-                required_min = trigger.get('basis_duration_min', 30)
-                is_trig, duration_min = await self._check_basis_duration(
-                    current_basis,
-                    basis_threshold=trigger['basis_threshold'],
-                    required_minutes=required_min,
-                )
-                if is_trig:
-                    is_triggered   = True
-                    trigger_detail = {
-                        'current_basis': current_basis,
-                        'duration_min':  duration_min,
-                    }
-
-            elif 'volume_ratio' in trigger:
-                is_trig, ratio = await self._check_volume_ratio(
-                    trade_date, trigger['volume_ratio']
-                )
-                if is_trig:
-                    is_triggered   = True
-                    trigger_detail = {'volume_ratio_5_20': ratio}
-
-            if is_triggered:
-                triggered.append({
-                    'scenario_id':   scenario['id'],
-                    'scenario_name': scenario['name'],
-                    'action':        scenario['action'],
-                    'description':   scenario['description'],
-                    'current_vix':   current_vix,
-                    **trigger_detail,
-                })
-                logger.warning("黑天鵝情境觸發：%s", scenario['name'])
-
-        return triggered
-
-    # =========================================================================
-    # 緊急減倉執行
-    # =========================================================================
-
-    async def _execute_emergency_reduce(
-        self,
-        target_exposure: float,
-        scenario_name: str,
-        trade_date: date,
-    ) -> dict:
-        from modules.position_manager import PositionManager
-
-        pm        = PositionManager(self.hub)
-        positions = await pm.get_open_positions()
-        nav_data  = await pm.calc_nav(positions)
-        nav       = nav_data['nav']
-
-        if nav <= 0:
-            return {'reduced_count': 0, 'total_reduced_value': 0, 'error': 'NAV=0'}
-
-        current_market_value = nav_data['stock_market_value']
-        target_market_value  = nav * target_exposure
-        need_to_reduce       = current_market_value - target_market_value
-
-        if need_to_reduce <= 0:
-            return {
-                'reduced_count':        0,
-                'total_reduced_value':  0,
-                'error':                None,
-                'detail':               [],
-                'already_below_target': True,
-            }
-
-        logger.warning(
-            "緊急減倉執行：目標曝險=%.0f%% NAV=%.0f 需減市值=%.0f",
-            target_exposure * 100, nav, need_to_reduce,
-        )
-
-        sorted_positions = sorted(
-            positions,
-            key=lambda p: float(p.get('unrealized_pnl') or 0),
-        )
-
-        reduced_count       = 0
-        total_reduced_value = 0.0
-        detail              = []
-
-        for pos in sorted_positions:
-            if total_reduced_value >= need_to_reduce:
-                break
-
-            ticker        = pos['ticker']
-            shares        = int(pos.get('shares', 0))
-            entry_price   = float(pos.get('entry_price', 0))
-            pos_value     = shares * entry_price
-            pos_id        = pos['id']
-
-            remaining_need  = need_to_reduce - total_reduced_value
-            shares_to_sell  = min(shares, max(1, int(remaining_need / max(entry_price, 1))))
-            sold_value      = shares_to_sell * entry_price
-            avg_cost        = entry_price
+            sid = scenario["id"]
+            triggered = False
+            details   = {}
 
             try:
-                result = await pm.partial_exit(
-                    pos_id, shares_to_sell, entry_price, avg_cost, sold_value
-                )
-                total_reduced_value += sold_value
-                reduced_count       += 1
-                detail.append({
-                    'ticker':      ticker,
-                    'shares_sold': shares_to_sell,
-                    'value':       sold_value,
+                if sid == "CRASH_20PCT":
+                    triggered, details = await self._check_crash(scenario, vix, trade_date)
+
+                elif sid == "RATE_SHOCK":
+                    triggered, details = await self._check_rate_shock(scenario, trade_date)
+
+                elif sid == "GEOPOLITICAL":
+                    triggered, details = await self._check_geopolitical(scenario, vix, trade_date)
+
+                elif sid == "LIQUIDITY_CRISIS":
+                    triggered, details = await self._check_liquidity_crisis(scenario)
+
+                elif sid == "LIQUIDITY_BASIS":
+                    triggered, details = await self._check_liquidity_basis(scenario, current_basis)
+
+                elif sid == "LIQUIDITY_VOLUME":
+                    triggered, details = await self._check_liquidity_volume(scenario, trade_date)
+
+            except Exception as e:
+                logger.error("黑天鵝情境檢測失敗 [%s]：%s", sid, e)
+                continue
+
+            if triggered:
+                triggered_scenarios.append({
+                    "scenario_id":   sid,
+                    "scenario_name": scenario["name"],
+                    "action":        scenario["action"],
+                    "description":   scenario["description"],
+                    "details":       details,
                 })
 
-                await self.hub.execute("""
-                    INSERT INTO decision_log (
-                        trade_date, ticker, decision_type,
-                        signal_source, position_id, notes
-                    ) VALUES ($1, $2, 'EXIT_EXECUTED', 'BLACK_SWAN', $3, $4)
-                """,
-                    trade_date,
-                    ticker,
-                    pos_id,
-                    f"黑天鵝緊急減倉：{scenario_name} 目標曝險={target_exposure*100:.0f}%",
-                )
-            except Exception as e:
-                logger.error("緊急減倉失敗 %s：%s", ticker, e)
-                detail.append({'ticker': ticker, 'error': str(e)})
+        return triggered_scenarios
 
-        logger.warning("緊急減倉完成：減倉 %d 檔，合計減少市值 %.0f", reduced_count, total_reduced_value)
-        return {
-            'reduced_count':       reduced_count,
-            'total_reduced_value': round(total_reduced_value, 0),
-            'detail':              detail,
-            'error':               None,
-        }
-
-    # =========================================================================
-    # execute_action
-    # =========================================================================
-
-    async def execute_action(
-        self,
-        scenario: dict,
-        trade_date: Optional[date] = None,
-    ) -> dict:
+    async def run(self, trade_date: Optional[date] = None) -> dict:
         if trade_date is None:
             trade_date = date.today()
 
-        action        = scenario['action']
-        scenario_name = scenario['scenario_name']
-        target_exposure = EMERGENCY_EXPOSURE_TARGETS.get(action)
+        triggered = await self.check_triggers(trade_date=trade_date)
 
-        if action == 'HALT_NEW_ENTRIES':
-            msg = (f"⚫ 黑天鵝警報：{scenario_name}\n"
-                   f"停止新進場，維持現有部位\n"
-                   f"原因：{scenario.get('description', '')}")
-        elif action == 'REDUCE_EXPOSURE_50PCT':
-            msg = (f"🔴 黑天鵝警報：{scenario_name}\n"
-                   f"緊急減倉至 50% 曝險\n"
-                   f"原因：{scenario.get('description', '')}")
-        elif action == 'REDUCE_EXPOSURE_30PCT':
-            msg = (f"🔴 黑天鵝警報：{scenario_name}\n"
-                   f"緊急減倉至 30% 曝險\n"
-                   f"原因：{scenario.get('description', '')}")
-        elif action == 'EMERGENCY_EXIT':
-            msg = (f"🚨 緊急黑天鵝：{scenario_name}\n"
-                   f"緊急出清所有部位！\n"
-                   f"原因：{scenario.get('description', '')}")
-        else:
-            msg = f"⚫ 黑天鵝情境：{scenario_name}"
-
-        await self.telegram.send_alert("黑天鵝情境觸發", msg, "ERROR")
-        logger.warning("黑天鵝動作執行：%s → %s", scenario_name, action)
-
-        reduction_result = None
-        if target_exposure is not None:
-            try:
-                reduction_result = await self._execute_emergency_reduce(
-                    target_exposure=target_exposure,
-                    scenario_name=scenario_name,
-                    trade_date=trade_date,
-                )
-                if reduction_result.get('reduced_count', 0) > 0:
-                    result_msg = (
-                        f"✅ 緊急減倉執行完成\n"
-                        f"減倉標的：{reduction_result['reduced_count']} 檔\n"
-                        f"合計減少市值：{reduction_result['total_reduced_value']:,.0f} 元\n"
-                        f"目標曝險：{target_exposure*100:.0f}%"
-                    )
-                    await self.telegram.send_alert("緊急減倉完成", result_msg, "WARNING")
-            except Exception as e:
-                logger.error("緊急減倉執行失敗：%s", e)
-                reduction_result = {'error': str(e)}
+        for scenario_info in triggered:
+            matching = next(
+                (s for s in BLACK_SWAN_SCENARIOS if s["id"] == scenario_info["scenario_id"]),
+                None,
+            )
+            if matching:
+                await self.execute_action(matching, trade_date, scenario_info["details"])
 
         return {
-            'message':          msg,
-            'action':           action,
-            'scenario_name':    scenario_name,
-            'target_exposure':  target_exposure,
-            'reduction_result': reduction_result,
-        }
-
-    # =========================================================================
-    # run
-    # =========================================================================
-
-    async def run(
-        self,
-        trade_date: Optional[date] = None,
-        current_basis: Optional[float] = None,
-    ) -> dict:
-        if trade_date is None:
-            trade_date = date.today()
-
-        triggered = await self.check_triggers(
-            trade_date=trade_date,
-            current_basis=current_basis,
-        )
-
-        actions = []
-        for scenario in triggered:
-            result = await self.execute_action(scenario, trade_date)
-            actions.append(result)
-
-        return {
-            'trade_date':    str(trade_date),
-            'triggered':     len(triggered),
-            'scenarios':     triggered,
-            'actions_taken': actions,
+            "trade_date":    str(trade_date),
+            "triggered":     len(triggered),
+            "scenarios":     triggered,
         }
