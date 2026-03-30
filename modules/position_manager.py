@@ -1,9 +1,13 @@
 # modules/position_manager.py
 # ═══════════════════════════════════════════════════════════════════════════════
-# Bug 修正（v3.1）：
-# - [BUG 3]  INSERT portfolio_health 補上 daily_pnl_pct（$13）
-# - [BUG A]  drawdown_from_peak 和 daily_pnl_pct 從硬編碼 0.0 改為實際計算
-#            修正前熔斷機制永遠不會觸發，有實際資金風險
+# 變更紀錄（v3.3.1）：
+# - [BUG 3]  INSERT portfolio_health 補上 daily_pnl_pct（$13）（已含於 v3.1）
+# - [BUG A]  drawdown_from_peak 和 daily_pnl_pct 改為實際計算（已含於 v3.1）
+# - [🟡 缺漏修復] calc_nav() 連通 account_config：
+#     無 portfolio_health 歷史快照時，從 account_config WHERE is_active=TRUE
+#     讀取 initial_capital 作為現金基準，取代硬編碼的 1,000,000.0
+# - [🟡 缺漏修復] run() 同時寫入 key_portfolio_exposure()：
+#     供 AddonEngine / Rebalancer 快速讀取即時曝險，不必每次查詢 DB
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import logging
@@ -27,6 +31,8 @@ EXPOSURE_LEVELS = {
     'BEAR_TREND': 0.10,
 }
 
+DEFAULT_INITIAL_CAPITAL = 1_000_000.0  # 僅在 account_config 查無資料時使用
+
 
 class PositionManager:
     """部位管理模組：NAV 計算、曝險控管、熔斷機制"""
@@ -46,14 +52,45 @@ class PositionManager:
         """)
         return [dict(r) for r in rows]
 
-    async def calc_nav(self, positions: list[dict]) -> dict:
-        """計算組合淨值（NAV）與相關指標"""
-        row = await self.hub.fetchrow("""
+    async def _get_initial_capital(self) -> float:
+        """
+        🟡 缺漏修復：從 account_config 讀取初始資金。
+        原本硬編碼 1_000_000.0，使用者在 account_config 更新資金設定後 PM 感知不到。
+        優先順序：portfolio_health 最新現金 → account_config.initial_capital → 硬編碼預設
+        """
+        # 先嘗試從 portfolio_health 取最新快照
+        ph_row = await self.hub.fetchrow("""
             SELECT nav, cash_amount FROM portfolio_health
             ORDER BY snapshot_date DESC LIMIT 1
         """)
+        if ph_row:
+            return float(ph_row['cash_amount'])
 
-        cash       = float(row['cash_amount']) if row else 1_000_000.0
+        # 無歷史快照，改從 account_config 讀取 initial_capital
+        ac_row = await self.hub.fetchrow("""
+            SELECT initial_capital FROM account_config
+            WHERE is_active = TRUE
+            LIMIT 1
+        """)
+        if ac_row:
+            capital = float(ac_row['initial_capital'])
+            logger.info("使用 account_config.initial_capital 作為現金基準：%.0f", capital)
+            return capital
+
+        # 最後防線：硬編碼預設值，並記錄警告
+        logger.warning(
+            "portfolio_health 和 account_config 均無資料，使用預設現金 %.0f",
+            DEFAULT_INITIAL_CAPITAL,
+        )
+        return DEFAULT_INITIAL_CAPITAL
+
+    async def calc_nav(self, positions: list[dict]) -> dict:
+        """
+        計算組合淨值（NAV）與相關指標。
+        🟡 缺漏修復：cash 來源改用 _get_initial_capital()，連通 account_config。
+        """
+        cash = await self._get_initial_capital()
+
         stock_value = sum(
             float(p.get('entry_price', 0)) * int(p.get('shares', 0))
             for p in positions
@@ -117,7 +154,7 @@ class PositionManager:
             WHERE trade_date <= $1
             ORDER BY trade_date DESC LIMIT 1
         """, trade_date)
-        regime = regime_row['regime']         if regime_row else 'CHOPPY'
+        regime = regime_row['regime']           if regime_row else 'CHOPPY'
         mrs    = float(regime_row['mrs_score']) if regime_row else 50.0
 
         max_exposure   = EXPOSURE_LEVELS.get(regime, 0.40)
@@ -125,7 +162,7 @@ class PositionManager:
 
         var_95 = self.calc_var_95(positions, nav)
 
-        # ── [BUG A 修正] 計算真實回撤（原本硬編碼為 0.0）────────────────────
+        # ── [BUG A 修正] 計算真實回撤 ─────────────────────────────────────
         peak_row = await self.hub.fetchrow("""
             SELECT MAX(nav) AS peak_nav FROM portfolio_health
             WHERE snapshot_date >= CURRENT_DATE - INTERVAL '252 days'
@@ -133,7 +170,7 @@ class PositionManager:
         peak_nav = float(peak_row['peak_nav']) if peak_row and peak_row['peak_nav'] else nav
         drawdown = max(0.0, (peak_nav - nav) / peak_nav) if peak_nav > 0 else 0.0
 
-        # ── [BUG A 修正] 計算真實單日損益（原本硬編碼為 0.0）───────────────
+        # ── [BUG A 修正] 計算真實單日損益 ────────────────────────────────
         yesterday_row = await self.hub.fetchrow("""
             SELECT nav FROM portfolio_health
             WHERE snapshot_date < $1
@@ -202,9 +239,26 @@ class PositionManager:
             round(daily_pnl_pct, 4),
         )
 
+        # ── Redis 快取：key_portfolio_state_latest（ExecutionGate 讀取）──────
         await self.hub.cache.set(
             rk.key_portfolio_state_latest(),
             result,
+            ttl=rk.TTL_10MIN,
+        )
+
+        # ── 🟡 缺漏修復：同時寫入 key_portfolio_exposure()────────────────────
+        # 讓 AddonEngine / Rebalancer 快速讀取即時曝險，無需每次查詢 DB
+        exposure_payload = {
+            'nav':                 nav_data['nav'],
+            'gross_exposure_pct':  nav_data['gross_exposure_pct'],
+            'exposure_level':      exposure_level,
+            'max_exposure':        max_exposure,
+            'circuit_triggered':   circuit,
+            'snapshot_date':       str(trade_date),
+        }
+        await self.hub.cache.set(
+            rk.key_portfolio_exposure(),
+            exposure_payload,
             ttl=rk.TTL_10MIN,
         )
 
@@ -219,9 +273,10 @@ class PositionManager:
         self,
         position_id: int,
         exit_shares: int,
-        exit_price: float,
+        exit_price: float = 0.0,
         avg_cost: Optional[float] = None,
         sold_value: Optional[float] = None,
+        reason: str = "PARTIAL_EXIT",
     ) -> dict:
         """部分出場"""
         row = await self.hub.fetchrow(
@@ -238,9 +293,9 @@ class PositionManager:
         if exit_shares >= current_shares:
             await self.hub.execute("""
                 UPDATE positions SET is_open=FALSE, exit_date=$1, exit_price=$2,
-                exit_reason='PARTIAL_EXIT', state='CLOSED', current_shares=0
-                WHERE id=$3
-            """, date.today(), exit_price, position_id)
+                exit_reason=$3, state='CLOSED', current_shares=0
+                WHERE id=$4
+            """, date.today(), exit_price, reason, position_id)
         else:
             new_shares = current_shares - exit_shares
             await self.hub.execute("""

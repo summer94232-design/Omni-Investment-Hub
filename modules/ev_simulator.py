@@ -1,4 +1,12 @@
 # modules/ev_simulator.py
+# ═══════════════════════════════════════════════════════════════════════════════
+# 變更紀錄（v3.3.1）：
+# - [🟢 建議修復] _simulate() 新增 seed 參數：
+#     日常執行：seed=None（保留隨機性）
+#     回測對比：傳入固定 seed（確保結果可重現）
+#     WalkForward 呼叫時可傳入 seed=42 進行歷史對比
+# ═══════════════════════════════════════════════════════════════════════════════
+
 import logging
 import numpy as np
 from datetime import date
@@ -23,7 +31,7 @@ SCENARIO_RETURNS = {
     'bear': {'mean': -1.0, 'std': 0.3},
 }
 
-N_SIMULATIONS = 10000  # ← 從 1000 提高到 10000，結果更穩定
+N_SIMULATIONS = 10000
 
 
 class EVSimulator:
@@ -32,42 +40,53 @@ class EVSimulator:
     def __init__(self, hub: DataHub):
         self.hub = hub
 
-    def _simulate(self, probs: dict, score: float, regime: str) -> dict:
-        """執行蒙地卡羅模擬，計算 EV（使用 numpy 向量化，速度快 10 倍）"""
-        rng = np.random.default_rng()  # 每次不同種子，但 10000 次後結果已收斂
+    def _simulate(
+        self,
+        probs:  dict,
+        score:  float,
+        regime: str,
+        seed:   Optional[int] = None,
+    ) -> dict:
+        """
+        執行蒙地卡羅模擬，計算 EV。
 
-        # 一次性抽出所有情境
-        rand = rng.random(N_SIMULATIONS)
+        🟢 建議修復：新增 seed 參數。
+          - seed=None（預設）：每次執行使用不同種子，保留日常隨機性
+          - seed=整數（如 seed=42）：固定種子，供回測對比確保結果可重現
+
+        使用方式：
+          日常執行：ev._simulate(probs, score, regime)
+          回測對比：ev._simulate(probs, score, regime, seed=42)
+        """
+        rng = np.random.default_rng(seed)  # seed=None 時行為與原本相同
+
+        rand      = rng.random(N_SIMULATIONS)
         score_adj = (score - 50) / 100
+        results   = np.zeros(N_SIMULATIONS)
 
-        results = np.zeros(N_SIMULATIONS)
-
-        # Bull 情境
         bull_mask = rand < probs['bull']
-        n_bull = bull_mask.sum()
+        n_bull    = bull_mask.sum()
         if n_bull > 0:
             mean = SCENARIO_RETURNS['bull']['mean'] * (1 + score_adj * 0.5)
             results[bull_mask] = rng.normal(mean, SCENARIO_RETURNS['bull']['std'], n_bull)
 
-        # Base 情境
         base_mask = (rand >= probs['bull']) & (rand < probs['bull'] + probs['base'])
-        n_base = base_mask.sum()
+        n_base    = base_mask.sum()
         if n_base > 0:
             mean = SCENARIO_RETURNS['base']['mean'] * (1 + score_adj * 0.5)
             results[base_mask] = rng.normal(mean, SCENARIO_RETURNS['base']['std'], n_base)
 
-        # Bear 情境
         bear_mask = rand >= probs['bull'] + probs['base']
-        n_bear = bear_mask.sum()
+        n_bear    = bear_mask.sum()
         if n_bear > 0:
             mean = SCENARIO_RETURNS['bear']['mean'] * (1 + score_adj * 0.5)
             results[bear_mask] = rng.normal(mean, SCENARIO_RETURNS['bear']['std'], n_bear)
 
         results.sort()
 
-        bull_r = results[results > 1.5]
-        base_r = results[(results >= -0.5) & (results <= 1.5)]
-        bear_r = results[results < -0.5]
+        bull_r  = results[results > 1.5]
+        base_r  = results[(results >= -0.5) & (results <= 1.5)]
+        bear_r  = results[results < -0.5]
         var_idx = int(N_SIMULATIONS * 0.05)
 
         return {
@@ -90,11 +109,16 @@ class EVSimulator:
 
     async def run(
         self,
-        ticker: str,
+        ticker:      str,
         total_score: float,
-        trade_date: Optional[date] = None,
+        trade_date:  Optional[date] = None,
+        seed:        Optional[int]  = None,   # 新增：回測時可傳入固定種子
     ) -> dict:
-        """執行 EV 模擬"""
+        """
+        執行 EV 模擬。
+        seed 參數說明：
+          日常執行不傳（隨機），Walk-Forward 回測比較時傳入 seed=42 確保可重現。
+        """
         if trade_date is None:
             trade_date = date.today()
 
@@ -106,7 +130,7 @@ class EVSimulator:
         regime = regime_row['regime'] if regime_row else 'CHOPPY'
 
         probs = SCENARIO_PROBS.get(regime, SCENARIO_PROBS['CHOPPY'])
-        sim   = self._simulate(probs, total_score, regime)
+        sim   = self._simulate(probs, total_score, regime, seed=seed)
         valid, reason = self.is_entry_valid(sim['ev_total'], sim['win_rate'])
 
         result = {
@@ -116,11 +140,12 @@ class EVSimulator:
             'total_score': total_score,
             'entry_valid': valid,
             'reason':      reason,
+            'seed_used':   seed,  # 方便 debug 確認是否使用固定種子
             **sim,
         }
 
         logger.info(
-            "EV模擬完成：%s EV=%.2f 勝率=%.0f%% 進場=%s",
-            ticker, sim['ev_total'], sim['win_rate']*100, valid
+            "EV模擬完成：%s EV=%.2f 勝率=%.0f%% 進場=%s seed=%s",
+            ticker, sim['ev_total'], sim['win_rate'] * 100, valid, seed,
         )
         return result

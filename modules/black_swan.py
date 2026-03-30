@@ -1,12 +1,12 @@
 # modules/black_swan.py
 # ═══════════════════════════════════════════════════════════════════════════════
-# 變更紀錄（v3.3）：
+# 變更紀錄（v3.3.1）：
 # - [BUG 1 修正] CRASH_20PCT market_drop 0.20 → 0.05，補雙重確認（已含於 v3.1）
 # - [流動性偵測] 新增 LIQUIDITY_BASIS / LIQUIDITY_VOLUME（已含於 v3.1）
-# - [LIQUIDITY_CRISIS 修正] 補上信用利差真實觸發邏輯：
-#     從 market_regime.credit_spread 讀取 BAA10Y 值（單位 %，需 ×100 轉 bp）
-#     > 200 bp 時觸發 EMERGENCY_EXIT
-#     原本此情境無任何數據支撐，永遠不會被真實數據觸發
+# - [LIQUIDITY_CRISIS 修正] 補上信用利差真實觸發邏輯（已含於 v3.3）
+# - [🟡 缺漏修復] _check_liquidity_crisis() 增加 hy_spread 雙指標判斷：
+#     credit_spread > 200bp OR hy_spread > 500bp 均可觸發 EMERGENCY_EXIT
+#     原本只判斷 credit_spread，hy_spread 欄位完全閒置
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import logging
@@ -43,9 +43,9 @@ BLACK_SWAN_SCENARIOS = [
     {
         "id":          "LIQUIDITY_CRISIS",
         "name":        "流動性危機（信用利差）",
-        "trigger":     {"spread_widen": 200},
+        "trigger":     {"spread_widen": 200, "hy_spread_widen": 500},
         "action":      "EMERGENCY_EXIT",
-        "description": "信用利差（BAA10Y）擴大超過 200bp",
+        "description": "信用利差（BAA10Y）> 200bp 或高收益債 OAS（BAMLH0A0HYM2）> 500bp",
     },
     {
         "id":          "LIQUIDITY_BASIS",
@@ -110,35 +110,57 @@ class BlackSwan:
 
     async def _check_liquidity_crisis(self, scenario: dict) -> tuple[bool, dict]:
         """
-        v3.3 修正：從 market_regime.credit_spread 讀取 BAA10Y 信用利差。
-        FRED BAA10Y 單位為 %（例如 2.0 代表 200bp），乘以 100 轉換為 bp。
-        觸發條件：> 200 bp → EMERGENCY_EXIT。
+        v3.3.1 修復：雙指標流動性危機偵測。
+        原本只判斷 credit_spread，hy_spread 欄位完全閒置。
+
+        觸發條件（OR 邏輯，任一滿足即觸發 EMERGENCY_EXIT）：
+          - credit_spread（BAA10Y）> 200bp：系統性信用壓力
+          - hy_spread（BAMLH0A0HYM2）> 500bp：高收益債流動性崩潰（更靈敏的前兆）
+
+        FRED 資料單位為 %（例如 2.0 = 200bp），乘以 100 轉換為 bp。
         """
         row = await self.hub.fetchrow("""
-            SELECT credit_spread, trade_date FROM market_regime
-            WHERE credit_spread IS NOT NULL
+            SELECT credit_spread, hy_spread, trade_date
+            FROM market_regime
+            WHERE credit_spread IS NOT NULL OR hy_spread IS NOT NULL
             ORDER BY trade_date DESC LIMIT 1
         """)
         if row is None:
             logger.debug("無信用利差資料，跳過 LIQUIDITY_CRISIS 檢查")
             return False, {"reason": "no_data"}
 
-        spread_pct = float(row["credit_spread"])
-        spread_bp  = spread_pct * 100          # % → bp
-        threshold  = scenario["trigger"]["spread_widen"]
-        triggered  = spread_bp > threshold
+        credit_spread_pct = float(row["credit_spread"]) if row["credit_spread"] is not None else None
+        hy_spread_pct     = float(row["hy_spread"])     if row["hy_spread"]     is not None else None
 
-        if triggered:
-            logger.warning(
-                "信用利差警報：%.1f bp > 門檻 %d bp（資料日期：%s）",
-                spread_bp, threshold, row["trade_date"],
-            )
+        credit_spread_bp = credit_spread_pct * 100 if credit_spread_pct is not None else None
+        hy_spread_bp     = hy_spread_pct     * 100 if hy_spread_pct     is not None else None
 
-        return triggered, {
-            "credit_spread_bp":    round(spread_bp, 1),
-            "threshold_bp":        threshold,
+        cs_threshold = scenario["trigger"]["spread_widen"]        # 200 bp
+        hy_threshold = scenario["trigger"].get("hy_spread_widen", 500)  # 500 bp
+
+        cs_triggered = credit_spread_bp is not None and credit_spread_bp > cs_threshold
+        hy_triggered = hy_spread_bp     is not None and hy_spread_bp     > hy_threshold
+        triggered    = cs_triggered or hy_triggered
+
+        details = {
+            "credit_spread_bp":    round(credit_spread_bp, 1) if credit_spread_bp is not None else None,
+            "hy_spread_bp":        round(hy_spread_bp,     1) if hy_spread_bp     is not None else None,
+            "cs_threshold_bp":     cs_threshold,
+            "hy_threshold_bp":     hy_threshold,
+            "cs_triggered":        cs_triggered,
+            "hy_triggered":        hy_triggered,
             "data_date":           str(row["trade_date"]),
         }
+
+        if triggered:
+            trigger_src = []
+            if cs_triggered:
+                trigger_src.append(f"credit_spread {credit_spread_bp:.1f}bp > {cs_threshold}bp")
+            if hy_triggered:
+                trigger_src.append(f"hy_spread {hy_spread_bp:.1f}bp > {hy_threshold}bp")
+            logger.warning("流動性危機警報：%s（資料日期：%s）", "，".join(trigger_src), row["trade_date"])
+
+        return triggered, details
 
     async def _check_liquidity_basis(
         self,
@@ -160,7 +182,6 @@ class BlackSwan:
     ) -> tuple[bool, dict]:
         volume_ratio_threshold = scenario["trigger"]["volume_ratio"]
 
-        # 從 market_regime 取大盤成交量（最近 25 日）
         rows = await self.hub.fetch("""
             SELECT trade_date, market_volume FROM market_regime
             WHERE market_volume IS NOT NULL AND trade_date <= $1
@@ -175,53 +196,39 @@ class BlackSwan:
             triggered = ratio < volume_ratio_threshold
             if triggered:
                 logger.warning("成交量萎縮警報：5MA/20MA=%.2f < 門檻 %.2f", ratio, volume_ratio_threshold)
-            return triggered, {"volume_ma5_ma20_ratio": round(ratio, 3)}
+            return triggered, {"volume_5ma_20ma_ratio": round(ratio, 4), "threshold": volume_ratio_threshold}
 
-        # 降級：從 chip_monitor 取平均量比
-        chip_rows = await self.hub.fetch("""
-            SELECT trade_date, AVG(volume_ratio_5d20d) AS avg_ratio
-            FROM chip_monitor
-            WHERE trade_date <= $1
-            GROUP BY trade_date
-            ORDER BY trade_date DESC LIMIT 5
-        """, trade_date)
-
-        if chip_rows:
-            avg_ratio = sum(float(r["avg_ratio"] or 1.0) for r in chip_rows) / len(chip_rows)
-            triggered = avg_ratio < volume_ratio_threshold
-            return triggered, {"volume_ratio_from_chip": round(avg_ratio, 3)}
-
-        return False, {"reason": "insufficient_data"}
-
-    # ── 市場日報酬 ───────────────────────────────────────────────────────────
+        return False, {"reason": "insufficient_data", "rows": len(rows)}
 
     async def _get_market_daily_return(self, trade_date: date) -> Optional[float]:
         rows = await self.hub.fetch("""
             SELECT trade_date, tsec_index_price FROM market_regime
-            WHERE trade_date <= $1 AND tsec_index_price IS NOT NULL
+            WHERE tsec_index_price IS NOT NULL AND trade_date <= $1
             ORDER BY trade_date DESC LIMIT 2
         """, trade_date)
         if len(rows) < 2:
             return None
-        today_p     = float(rows[0]["tsec_index_price"])
-        yesterday_p = float(rows[1]["tsec_index_price"])
-        if yesterday_p <= 0:
+        today_p = float(rows[0]["tsec_index_price"])
+        prev_p  = float(rows[1]["tsec_index_price"])
+        if prev_p == 0:
             return None
-        return (today_p - yesterday_p) / yesterday_p
+        return (today_p - prev_p) / prev_p
 
     # ── 動作執行 ─────────────────────────────────────────────────────────────
 
-    async def execute_action(self, scenario: dict, trade_date: date, details: dict):
+    async def execute_action(
+        self,
+        scenario: dict,
+        trade_date: date,
+        details: dict,
+    ) -> None:
         action = scenario["action"]
-        logger.warning("黑天鵝執行：%s → %s", scenario["name"], action)
+        logger.warning("執行黑天鵝動作：%s → %s", scenario["name"], action)
 
-        try:
-            from modules.position_manager import PositionManager
-            pm = PositionManager(self.hub)
-        except Exception:
-            pm = None
+        from modules.position_manager import PositionManager
+        pm = PositionManager(self.hub)
 
-        if action == "REDUCE_EXPOSURE_50PCT" and pm:
+        if action == "REDUCE_EXPOSURE_50PCT":
             positions = await self.hub.fetch(
                 "SELECT id, ticker, current_shares FROM positions WHERE is_open = TRUE"
             )
@@ -230,7 +237,7 @@ class BlackSwan:
                 if reduce_shares > 0:
                     await pm.partial_exit(pos["id"], reduce_shares, reason="BLACK_SWAN_50PCT")
 
-        elif action == "REDUCE_EXPOSURE_30PCT" and pm:
+        elif action == "REDUCE_EXPOSURE_30PCT":
             positions = await self.hub.fetch(
                 "SELECT id, ticker, current_shares FROM positions WHERE is_open = TRUE"
             )
@@ -253,7 +260,6 @@ class BlackSwan:
                 ttl=rk.TTL_24H,
             )
 
-        # 寫入 decision_log
         import json
         await self.hub.execute("""
             INSERT INTO decision_log (
@@ -352,7 +358,7 @@ class BlackSwan:
                 await self.execute_action(matching, trade_date, scenario_info["details"])
 
         return {
-            "trade_date":    str(trade_date),
-            "triggered":     len(triggered),
-            "scenarios":     triggered,
+            "trade_date": str(trade_date),
+            "triggered":  len(triggered),
+            "scenarios":  triggered,
         }

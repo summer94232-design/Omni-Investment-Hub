@@ -1,11 +1,12 @@
-# dashboard.py  ── v3 完整版
+# dashboard.py  ── v3.3.1 完整版
 # ═══════════════════════════════════════════════════════════════════════════════
 # Bug 修正（v3.1）：
-# - [BUG 8]  handle_api_run_scheduler 改為呼叫 Scheduler.run_daily()，
-#            不再只執行 MacroFilter，Steps 1–7 全部執行
-# - [BUG 12] handle_index、handle_api_run_scheduler、handle_api_black_swan 等
-#            涉及 open() 的地方，全部改用 BASE_DIR 絕對路徑，
-#            避免在非專案根目錄啟動時拋出 FileNotFoundError
+# - [BUG 8]  handle_api_run_scheduler 改為呼叫 Scheduler.run_daily()
+# - [BUG 12] 所有檔案路徑改用 BASE_DIR 絕對路徑
+# 新增（v3.3.1）：
+# - [🟢 修復] handle_api_approve_order：POST /api/approve-order/{order_id}
+#             讓操盤手透過 Dashboard 確認大單，修復 gate3_human_approval 永遠逾時問題
+# - [🟢 修復] create_app() 中同步載入 Watchlist（從 DB，降級使用靜態清單）
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import asyncio
@@ -17,12 +18,14 @@ from datetime import date, datetime
 from decimal import Decimal
 from aiohttp import web
 from datahub.data_hub import DataHub
+from datahub import redis_keys as rk
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# [BUG 12 修正] 使用 __file__ 計算絕對路徑，確保從任何工作目錄啟動都能找到檔案
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+WATCHLIST_FALLBACK = ['2330', '2303', '2454', '2412', '2317', '2382', '3711', '6669']
 
 
 def serialize(obj):
@@ -32,6 +35,10 @@ def serialize(obj):
         return float(obj)
     return str(obj)
 
+
+# =============================================================================
+# Dashboard 資料聚合
+# =============================================================================
 
 async def get_dashboard_data(hub):
     regime = await hub.fetchrow("""
@@ -115,8 +122,11 @@ async def get_dashboard_data(hub):
     }
 
 
+# =============================================================================
+# 路由 Handlers
+# =============================================================================
+
 async def handle_index(request):
-    # [BUG 12 修正] 使用 BASE_DIR 絕對路徑，原本 open('static/index.html') 相對路徑
     index_path = os.path.join(BASE_DIR, 'static', 'index.html')
     with open(index_path, encoding='utf-8') as f:
         content = f.read()
@@ -151,6 +161,52 @@ async def handle_api_settings_save(request):
     body = await request.json()
     request.app['settings'].update(body)
     return web.Response(text='{"ok":true}', content_type='application/json')
+
+
+async def handle_api_watchlist(request):
+    return web.Response(
+        text=json.dumps(request.app['watchlist'], ensure_ascii=False),
+        content_type='application/json'
+    )
+
+
+async def handle_api_watchlist_add(request):
+    hub  = request.app['hub']
+    body = await request.json()
+    t    = body.get('ticker', '').strip().upper()
+    if t and t not in request.app['watchlist']:
+        request.app['watchlist'].append(t)
+        # 同步寫入 DB（若 watchlist 資料表存在）
+        try:
+            await hub.execute("""
+                INSERT INTO watchlist (ticker, is_active, added_at)
+                VALUES ($1, TRUE, NOW())
+                ON CONFLICT (ticker) DO UPDATE SET is_active = TRUE
+            """, t)
+        except Exception:
+            pass  # 資料表不存在時靜默忽略
+    return web.Response(
+        text=json.dumps(request.app['watchlist']),
+        content_type='application/json'
+    )
+
+
+async def handle_api_watchlist_remove(request):
+    hub  = request.app['hub']
+    body = await request.json()
+    t    = body.get('ticker', '').strip().upper()
+    if t in request.app['watchlist']:
+        request.app['watchlist'].remove(t)
+        try:
+            await hub.execute("""
+                UPDATE watchlist SET is_active = FALSE WHERE ticker = $1
+            """, t)
+        except Exception:
+            pass
+    return web.Response(
+        text=json.dumps(request.app['watchlist']),
+        content_type='application/json'
+    )
 
 
 async def handle_api_close_position(request):
@@ -198,14 +254,7 @@ async def handle_api_reduce_position(request):
 async def handle_api_merge_positions(request):
     """
     相同 ticker 的多筆開倉合併為一筆。
-    合併規則：
-      - 保留 entry_date 最早那筆（主筆）
-      - 加權平均成本 = Σ(shares × avg_cost) / Σshares
-      - current_shares / initial_shares 加總
-      - realized_pnl 加總
-      - 其餘欄位（state、stop、atr 等）以主筆為準
-      - 副筆標記 is_open=FALSE, exit_reason='MERGED'
-    Body: { "ticker": "2330" }  ← 可指定單一 ticker，不傳則合併所有重複 ticker
+    Body: { "ticker": "2330" }（不傳則合併所有重複 ticker）
     """
     hub  = request.app['hub']
     body = await request.json()
@@ -236,7 +285,7 @@ async def handle_api_merge_positions(request):
         merged_detail = []
 
         for row in dup_rows:
-            tk = row['ticker']
+            tk        = row['ticker']
             positions = await hub.fetch("""
                 SELECT id, ticker, current_shares, avg_cost, initial_shares,
                        realized_pnl, entry_date
@@ -251,10 +300,10 @@ async def handle_api_merge_positions(request):
             main_pos  = positions[0]
             sub_poses = positions[1:]
 
-            total_shares      = sum(int(p['current_shares']) for p in positions)
-            total_cost        = sum(int(p['current_shares']) * float(p['avg_cost'] or 0) for p in positions)
-            new_avg_cost      = round(total_cost / total_shares, 4) if total_shares > 0 else float(main_pos['avg_cost'] or 0)
-            total_init_shares = sum(int(p['initial_shares']) for p in positions)
+            total_shares       = sum(int(p['current_shares']) for p in positions)
+            total_cost         = sum(int(p['current_shares']) * float(p['avg_cost'] or 0) for p in positions)
+            new_avg_cost       = round(total_cost / total_shares, 4) if total_shares > 0 else float(main_pos['avg_cost'] or 0)
+            total_init_shares  = sum(int(p['initial_shares']) for p in positions)
             total_realized_pnl = sum(float(p['realized_pnl'] or 0) for p in positions)
 
             await hub.execute("""
@@ -327,8 +376,7 @@ async def handle_api_add_position(request):
     except Exception as e:
         return web.Response(
             text=json.dumps({'ok': False, 'error': str(e)}, ensure_ascii=False),
-            content_type='application/json',
-            status=500,
+            content_type='application/json', status=500,
         )
 
 
@@ -343,53 +391,13 @@ async def handle_api_add_event(request):
     return web.Response(text='{"ok":true}', content_type='application/json')
 
 
-async def handle_api_watchlist(request):
-    return web.Response(
-        text=json.dumps(request.app['watchlist'], ensure_ascii=False),
-        content_type='application/json'
-    )
-
-
-async def handle_api_watchlist_add(request):
-    body = await request.json()
-    t    = body.get('ticker', '').strip().upper()
-    if t and t not in request.app['watchlist']:
-        request.app['watchlist'].append(t)
-    return web.Response(
-        text=json.dumps(request.app['watchlist']),
-        content_type='application/json'
-    )
-
-
-async def handle_api_watchlist_remove(request):
-    body = await request.json()
-    t    = body.get('ticker', '').strip().upper()
-    if t in request.app['watchlist']:
-        request.app['watchlist'].remove(t)
-    return web.Response(
-        text=json.dumps(request.app['watchlist']),
-        content_type='application/json'
-    )
-
-
 async def handle_api_run_scheduler(request):
     """
-    [BUG 8 修正] 原本只執行 MacroFilter.run()，Steps 2–7 全部略過。
-    現在改為呼叫 Scheduler.run_daily()，完整執行所有 7 個步驟：
-      Step 1  MacroFilter
-      Step 2  ChipMonitor
-      Step 3  SelectionEngine（含基差過濾）
-      Step 4  ExitEngine
-      Step 5  SignalBus（訊號派送）
-      Step 6  Attribution
-      Step 7  Maintenance（月底分區）
-
-    [BUG 12 修正] config.yaml 路徑改用 BASE_DIR 絕對路徑
+    [BUG 8 修正] 完整執行 Scheduler.run_daily()（Steps 0–7）
+    [BUG 12 修正] 使用 BASE_DIR 絕對路徑
     """
-    hub = request.app['hub']
     try:
         config_path = os.path.join(BASE_DIR, 'config.yaml')
-
         from modules.scheduler import Scheduler
         sched = Scheduler(config_path)
         await sched.connect()
@@ -468,7 +476,6 @@ async def handle_api_walk_forward(request):
 
 
 async def handle_api_attribution(request):
-    """v3：完整歸因分析"""
     hub = request.app['hub']
     try:
         from modules.attribution import Attribution
@@ -487,52 +494,125 @@ async def handle_api_attribution(request):
 
 
 async def handle_api_reset_regime_threshold(request):
-    """v3：重置環境回饋門檻覆蓋值"""
     hub  = request.app['hub']
     body = await request.json()
     regime = body.get('regime', '')
     if regime:
-        cache_key = f"regime:score_threshold_override:{regime}"
-        await hub.cache.delete(cache_key)
+        await hub.cache.delete(f"regime:score_threshold_override:{regime}")
     else:
         for r in ['BULL_TREND', 'WEAK_BULL', 'CHOPPY', 'BEAR_TREND']:
             await hub.cache.delete(f"regime:score_threshold_override:{r}")
     return web.Response(text='{"ok":true}', content_type='application/json')
 
 
+async def handle_api_approve_order(request):
+    """
+    🟢 修復：人工確認大單審核端點。
+    修復前：gate3_human_approval() 等待 Redis status=APPROVED，
+            但無任何端點能寫入，所有大單（>10萬）永遠逾時被拒絕。
+    修復後：操盤手透過 Dashboard 呼叫此端點，寫入 APPROVED/REJECTED。
+
+    POST /api/approve-order/{order_id}
+    Body: {"action": "approve"} 或 {"action": "reject"}
+    """
+    hub      = request.app['hub']
+    order_id = request.match_info['order_id']
+
+    try:
+        body   = await request.json()
+        action = body.get('action', 'approve').lower()
+    except Exception:
+        action = 'approve'
+
+    cache_key = rk.key_gate_pending(order_id)
+
+    try:
+        cached = await hub.cache.get(cache_key)
+        if cached is None:
+            return web.Response(
+                text=json.dumps({'ok': False, 'error': f'order_id={order_id} 不存在或已逾時'}),
+                content_type='application/json',
+                status=404,
+            )
+
+        if isinstance(cached, dict):
+            cached['status'] = 'APPROVED' if action == 'approve' else 'REJECTED'
+        else:
+            cached = {'status': 'APPROVED' if action == 'approve' else 'REJECTED'}
+
+        # 延長 TTL 至 5 分鐘，讓 ExecutionGate 有足夠時間讀取
+        await hub.cache.set(cache_key, cached, ttl=300)
+
+        logger.info("人工審核：order_id=%s → %s", order_id, cached['status'])
+        return web.Response(
+            text=json.dumps({'ok': True, 'order_id': order_id, 'status': cached['status']}),
+            content_type='application/json',
+        )
+    except Exception as e:
+        logger.exception("handle_api_approve_order 失敗")
+        return web.Response(
+            text=json.dumps({'ok': False, 'error': str(e)}),
+            content_type='application/json',
+            status=500,
+        )
+
+
+# =============================================================================
+# App 初始化
+# =============================================================================
+
+async def _load_watchlist_from_db(hub: DataHub) -> list:
+    """啟動時從 DB 載入 Watchlist，失敗時使用靜態備用清單。"""
+    try:
+        rows = await hub.fetch("""
+            SELECT ticker FROM watchlist
+            WHERE is_active = TRUE
+            ORDER BY added_at ASC
+        """)
+        if rows:
+            return [str(r["ticker"]).strip() for r in rows]
+    except Exception:
+        pass
+    return list(WATCHLIST_FALLBACK)
+
+
 async def create_app():
-    # [BUG 12 修正] 絕對路徑讀取 config.yaml
     config_path = os.path.join(BASE_DIR, 'config.yaml')
     hub = DataHub(config_path)
     await hub.connect()
 
+    # 🟢 修復：Watchlist 從 DB 動態載入
+    watchlist = await _load_watchlist_from_db(hub)
+
     app = web.Application()
     app['hub']       = hub
-    app['watchlist'] = ['2330', '2303', '2454', '2412', '2317', '2382', '3711', '6669']
+    app['watchlist'] = watchlist
     app['settings']  = {
         'mode': 'PAPER',
         'atr_mult_bull': 3.0, 'atr_mult_choppy': 2.0, 'atr_mult_bear': 1.5,
         'trail_pct': 15, 'score_threshold': 60, 'ev_threshold': 0.5,
     }
 
-    app.router.add_get('/',                            handle_index)
-    app.router.add_get('/api/data',                    handle_api_data)
-    app.router.add_get('/api/settings',                handle_api_settings)
-    app.router.add_get('/api/watchlist',               handle_api_watchlist)
-    app.router.add_get('/api/attribution',             handle_api_attribution)
-    app.router.add_post('/api/settings/save',          handle_api_settings_save)
-    app.router.add_post('/api/close-position',         handle_api_close_position)
-    app.router.add_post('/api/reduce-position',        handle_api_reduce_position)
-    app.router.add_post('/api/merge-positions',        handle_api_merge_positions)  # [新增]
-    app.router.add_post('/api/add-position',           handle_api_add_position)
-    app.router.add_post('/api/add-event',              handle_api_add_event)
-    app.router.add_post('/api/watchlist/add',          handle_api_watchlist_add)
-    app.router.add_post('/api/watchlist/remove',       handle_api_watchlist_remove)
-    app.router.add_post('/api/run-scheduler',          handle_api_run_scheduler)
-    app.router.add_post('/api/ev-simulate',            handle_api_ev_simulate)
-    app.router.add_post('/api/black-swan',             handle_api_black_swan)
-    app.router.add_post('/api/walk-forward',           handle_api_walk_forward)
-    app.router.add_post('/api/reset-regime-threshold', handle_api_reset_regime_threshold)
+    # ── 路由註冊 ──────────────────────────────────────────────────────────────
+    app.router.add_get('/',                                   handle_index)
+    app.router.add_get('/api/data',                           handle_api_data)
+    app.router.add_get('/api/settings',                       handle_api_settings)
+    app.router.add_get('/api/watchlist',                      handle_api_watchlist)
+    app.router.add_get('/api/attribution',                    handle_api_attribution)
+    app.router.add_post('/api/settings/save',                 handle_api_settings_save)
+    app.router.add_post('/api/close-position',                handle_api_close_position)
+    app.router.add_post('/api/reduce-position',               handle_api_reduce_position)
+    app.router.add_post('/api/merge-positions',               handle_api_merge_positions)
+    app.router.add_post('/api/add-position',                  handle_api_add_position)
+    app.router.add_post('/api/add-event',                     handle_api_add_event)
+    app.router.add_post('/api/watchlist/add',                 handle_api_watchlist_add)
+    app.router.add_post('/api/watchlist/remove',              handle_api_watchlist_remove)
+    app.router.add_post('/api/run-scheduler',                 handle_api_run_scheduler)
+    app.router.add_post('/api/ev-simulate',                   handle_api_ev_simulate)
+    app.router.add_post('/api/black-swan',                    handle_api_black_swan)
+    app.router.add_post('/api/walk-forward',                  handle_api_walk_forward)
+    app.router.add_post('/api/reset-regime-threshold',        handle_api_reset_regime_threshold)
+    app.router.add_post('/api/approve-order/{order_id}',      handle_api_approve_order)  # 🟢 新增
 
     return app
 
@@ -544,7 +624,7 @@ if __name__ == '__main__':
         await runner.setup()
         site = web.TCPSite(runner, 'localhost', 8080)
         await site.start()
-        print("Dashboard v3 啟動：http://localhost:8080")
+        print("Dashboard v3.3.1 啟動：http://localhost:8080")
         print("按 Ctrl+C 停止")
         try:
             await asyncio.Event().wait()
